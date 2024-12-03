@@ -25,10 +25,45 @@ class MethodArgsChecker(BaseChecker):
 
         Package uses inferred node in order to know the package imported.
         """
-        pass
+        if isinstance(node.func, nodes.Attribute):
+            inferred = utils.safe_infer(node.func)
+            if inferred and isinstance(inferred, astroid.BoundMethod):
+                full_name = inferred.qname()
+                if full_name in self.config.timeout_methods:
+                    if not any(arg.name == "timeout" for arg in node.keywords):
+                        self.add_message(
+                            "missing-timeout",
+                            node=node,
+                            args=(full_name.split(".")[-1],),
+                        )
 
     def _check_positional_only_arguments_expected(self, node: nodes.Call) -> None:
         """Check if positional only arguments have been passed as keyword arguments by
         inspecting its method definition.
         """
-        pass
+        inferred_func = utils.safe_infer(node.func)
+        if not inferred_func:
+            return
+
+        if not isinstance(inferred_func, (astroid.FunctionDef, astroid.ClassDef)):
+            return
+
+        positional_only_args = []
+        if isinstance(inferred_func, astroid.ClassDef):
+            init_method = inferred_func.local_attr("__init__")
+            if not init_method:
+                return
+            inferred_func = init_method[0]
+
+        for arg in inferred_func.args.posonlyargs:
+            positional_only_args.append(arg.name)
+
+        keyword_args = [arg.arg for arg in node.keywords]
+        violation_args = [arg for arg in keyword_args if arg in positional_only_args]
+
+        if violation_args:
+            self.add_message(
+                "positional-only-arguments-expected",
+                node=node,
+                args=(node.func.as_string(), ", ".join(violation_args)),
+            )
