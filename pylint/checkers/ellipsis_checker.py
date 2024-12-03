@@ -21,4 +21,19 @@ class EllipsisChecker(BaseChecker):
            For example: A function consisting of an ellipsis followed by a
            return statement on the next line.
         """
-        pass
+        if node.value != Ellipsis:
+            return
+
+        parent = node.parent
+        if isinstance(parent, nodes.Expr) and parent.lineno == node.lineno:
+            # Check if the ellipsis is preceded by a docstring
+            if isinstance(parent.previous_sibling(), nodes.Const) and isinstance(parent.previous_sibling().value, str):
+                self.add_message('unnecessary-ellipsis', node=node)
+                return
+
+            # Check if there are other statements in the same scope
+            scope = node.scope()
+            if isinstance(scope, (nodes.FunctionDef, nodes.ClassDef)):
+                statements = [stmt for stmt in scope.body if not isinstance(stmt, nodes.Const)]
+                if len(statements) > 1:
+                    self.add_message('unnecessary-ellipsis', node=node)
