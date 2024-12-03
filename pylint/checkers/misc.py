@@ -17,7 +17,18 @@ class ByIdManagedMessagesChecker(BaseRawFileChecker):
 
     def process_module(self, node: nodes.Module) -> None:
         """Inspect the source file to find messages activated or deactivated by id."""
-        pass
+        for comment in node.body:
+            if isinstance(comment, nodes.Comment):
+                match = re.search(r'pylint:\s*(disable|enable)=([A-Z]\d{4}(?:,\s*[A-Z]\d{4})*)', comment.value)
+                if match:
+                    action, message_ids = match.groups()
+                    for message_id in message_ids.split(','):
+                        message_id = message_id.strip()
+                        self.add_message(
+                            'use-symbolic-message-instead',
+                            line=comment.lineno,
+                            args=f"'{action}={message_id}' should use symbolic names",
+                        )
 
 class EncodingChecker(BaseTokenChecker, BaseRawFileChecker):
     """BaseChecker for encoding issues.
@@ -32,8 +43,38 @@ class EncodingChecker(BaseTokenChecker, BaseRawFileChecker):
 
     def process_module(self, node: nodes.Module) -> None:
         """Inspect the source file to find encoding problem."""
-        pass
+        encoding = node.file_encoding
+        if encoding is None:
+            self.add_message(
+                'no-encoding-declaration',
+                line=1,
+                args='No encoding declared in file',
+            )
+        elif encoding.lower() != 'utf-8':
+            self.add_message(
+                'non-utf8-encoding',
+                line=1,
+                args=f'File encoding is {encoding}, consider using UTF-8',
+            )
 
     def process_tokens(self, tokens: list[tokenize.TokenInfo]) -> None:
         """Inspect the source to find fixme problems."""
-        pass
+        notes_regexp = '|'.join(map(re.escape, self.config.notes))
+        if self.config.notes_rgx:
+            notes_regexp = f'({notes_regexp}|{self.config.notes_rgx})'
+        else:
+            notes_regexp = f'({notes_regexp})'
+        
+        regexp = re.compile(notes_regexp, re.IGNORECASE)
+        for token in tokens:
+            if token.type == tokenize.COMMENT:
+                comment = token.string.lstrip('#').strip()
+                match = regexp.search(comment)
+                if match:
+                    note = match.group(1)
+                    self.add_message(
+                        'fixme',
+                        args=comment,
+                        line=token.start[0],
+                        col_offset=token.start[1],
+                    )
