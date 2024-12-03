@@ -24,4 +24,19 @@ class MagicValueChecker(BaseChecker):
         Magic values in any side of the comparison should be avoided,
         Detects comparisons that `comparison-of-constants` core checker cannot detect.
         """
-        pass
+        def is_magic_value(operand):
+            return (
+                isinstance(operand, nodes.Const)
+                and operand.value not in self.valid_magic_vals
+                and not isinstance(operand.value, bool)
+                and operand.value is not None
+            )
+
+        for side in (node.left, *node.ops):
+            if is_magic_value(side):
+                self.add_message(
+                    "magic-value-comparison",
+                    node=node,
+                    args=side.value,
+                    confidence=HIGH,
+                )
