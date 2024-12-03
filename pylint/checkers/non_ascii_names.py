@@ -22,15 +22,25 @@ class NonAsciiNameChecker(base_checker.BaseChecker):
 
     def _check_name(self, node_type: str, name: str | None, node: nodes.NodeNG) -> None:
         """Check whether a name is using non-ASCII characters."""
-        pass
+        if name is None:
+            return
+        if not name.isascii():
+            if isinstance(node, nodes.Module):
+                self.add_message("non-ascii-file-name", node=node, args=(node_type, name))
+            elif isinstance(node, (nodes.ImportFrom, nodes.Import)):
+                self.add_message("non-ascii-module-import", node=node, args=(node_type, name))
+            else:
+                self.add_message("non-ascii-name", node=node, args=(node_type, name))
     visit_asyncfunctiondef = visit_functiondef
 
     @utils.only_required_for_messages('non-ascii-name')
     def visit_assignname(self, node: nodes.AssignName) -> None:
         """Check module level assigned names."""
-        pass
+        if isinstance(node.parent, nodes.Assign) and node.parent.parent.scope_type == "module":
+            self._check_name("variable", node.name, node)
 
     @utils.only_required_for_messages('non-ascii-name')
     def visit_call(self, node: nodes.Call) -> None:
         """Check if the used keyword args are correct."""
-        pass
+        for keyword in node.keywords:
+            self._check_name("keyword argument", keyword.arg, keyword)
