@@ -15,8 +15,19 @@ class LambdaExpressionChecker(BaseChecker):
 
     def visit_assign(self, node: nodes.Assign) -> None:
         """Check if lambda expression is assigned to a variable."""
-        pass
+        for target in node.targets:
+            if isinstance(node.value, nodes.Lambda):
+                self.add_message(
+                    'unnecessary-lambda-assignment',
+                    node=target,
+                    confidence=HIGH
+                )
 
     def visit_call(self, node: nodes.Call) -> None:
         """Check if lambda expression is called directly."""
-        pass
+        if isinstance(node.func, nodes.Lambda):
+            self.add_message(
+                'unnecessary-direct-lambda-call',
+                node=node,
+                confidence=HIGH
+            )
