@@ -16,7 +16,17 @@ def _safe_infer_call_result(node: nodes.FunctionDef, caller: nodes.FunctionDef, 
     Returns None if inference failed or if there is some ambiguity (more than
     one node has been inferred). Otherwise, returns inferred value.
     """
-    pass
+    try:
+        inferred_results = list(node.infer_call_result(caller, context=context))
+        if len(inferred_results) == 1:
+            return inferred_results[0]
+        if len(inferred_results) > 1:
+            # Check if all inferred results are the same
+            if all(result == inferred_results[0] for result in inferred_results[1:]):
+                return inferred_results[0]
+    except astroid.InferenceError:
+        pass
+    return None
 
 class SpecialMethodsChecker(BaseChecker):
     """Checker which verifies that special methods
