@@ -21,10 +21,30 @@ class ASTWalker:
 
     def add_checker(self, checker: BaseChecker) -> None:
         """Walk to the checker's dir and collect visit and leave methods."""
-        pass
+        for member in dir(checker):
+            if member.startswith('visit_'):
+                self.visit_events[member[6:]].append(getattr(checker, member))
+            elif member.startswith('leave_'):
+                self.leave_events[member[6:]].append(getattr(checker, member))
 
     def walk(self, astroid: nodes.NodeNG) -> None:
         """Call visit events of astroid checkers for the given node, recurse on
         its children, then leave events.
         """
-        pass
+        try:
+            callbacks = self.visit_events[astroid.__class__.__name__]
+            for cb in callbacks:
+                cb(astroid)
+            
+            for child in astroid.get_children():
+                self.walk(child)
+            
+            callbacks = self.leave_events[astroid.__class__.__name__]
+            for cb in callbacks:
+                cb(astroid)
+        except Exception:
+            exc_info = sys.exc_info()
+            if self.exception_msg:
+                self.linter.add_message('E0013', line=astroid.lineno, args=exc_info[1])
+            else:
+                traceback.print_exc()
