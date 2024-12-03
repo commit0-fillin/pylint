@@ -34,7 +34,10 @@ INCOMPATIBLE_WITH_USELESS_SUPPRESSION = frozenset(['R0401', 'W0402', 'W1505', 'W
 
 def _get_pylint_home() -> str:
     """Return the pylint home."""
-    pass
+    pylint_home = os.environ.get("PYLINTHOME")
+    if pylint_home:
+        return pylint_home
+    return DEFAULT_PYLINT_HOME
 PYLINT_HOME = _get_pylint_home()
 TYPING_NORETURN = frozenset(('typing.NoReturn', 'typing_extensions.NoReturn'))
 TYPING_NEVER = frozenset(('typing.Never', 'typing_extensions.Never'))
