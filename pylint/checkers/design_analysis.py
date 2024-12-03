@@ -24,14 +24,31 @@ STDLIB_CLASSES_IGNORE_ANCESTOR = frozenset(('builtins.object', 'builtins.tuple',
 
 def _is_exempt_from_public_methods(node: astroid.ClassDef) -> bool:
     """Check if a class is exempt from too-few-public-methods."""
-    pass
+    return (
+        is_enum(node)
+        or node.name in STDLIB_CLASSES_IGNORE_ANCESTOR
+        or any(
+            node.is_subtype_of(f"{DATACLASS_IMPORT}.{decorator}")
+            for decorator in DATACLASSES_DECORATORS
+        )
+        or any(
+            node.is_subtype_of(f"{ATTRS_IMPORT}.{decorator}")
+            for decorator in ATTRS_DECORATORS
+        )
+        or node.is_subtype_of(TYPING_NAMEDTUPLE)
+        or node.is_subtype_of(TYPING_TYPEDDICT)
+        or node.is_subtype_of(TYPING_EXTENSIONS_TYPEDDICT)
+    )
 
 def _count_boolean_expressions(bool_op: nodes.BoolOp) -> int:
     """Counts the number of boolean expressions in BoolOp `bool_op` (recursive).
 
     example: a and (b or c or (d and e)) ==> 5 boolean expressions
     """
-    pass
+    return sum(
+        _count_boolean_expressions(node) if isinstance(node, nodes.BoolOp) else 1
+        for node in bool_op.values
+    )
 
 def _get_parents_iter(node: nodes.ClassDef, ignored_parents: frozenset[str]) -> Iterator[nodes.ClassDef]:
     """Get parents of ``node``, excluding ancestors of ``ignored_parents``.
@@ -49,7 +66,10 @@ def _get_parents_iter(node: nodes.ClassDef, ignored_parents: frozenset[str]) -> 
     And ``ignored_parents`` is ``{"E"}``, then this function will return
     ``{A, B, C, D}`` -- both ``E`` and its ancestors are excluded.
     """
-    pass
+    for parent in node.ancestors():
+        if parent.qname() in ignored_parents:
+            continue
+        yield parent
 
 class MisdesignChecker(BaseChecker):
     """Checker of potential misdesigns.
@@ -70,24 +90,98 @@ class MisdesignChecker(BaseChecker):
 
     def open(self) -> None:
         """Initialize visit variables."""
-        pass
+        self._returns = []
+        self._branches = defaultdict(int)
+        self._stmts = []
 
     @only_required_for_messages('too-many-ancestors', 'too-many-instance-attributes', 'too-few-public-methods', 'too-many-public-methods')
     def visit_classdef(self, node: nodes.ClassDef) -> None:
         """Check size of inheritance hierarchy and number of instance attributes."""
-        pass
+        ignored_parents = frozenset(self.linter.config.ignored_parents)
+        # Do not check ignored classes
+        if node.qname() in ignored_parents:
+            return
+
+        # Count the number of ancestors
+        try:
+            ancestors = list(_get_parents_iter(node, ignored_parents))
+        except astroid.MroError:
+            # This class has an invalid MRO, this should be reported by another checker.
+            return
+        
+        # Only check ancestors if the class has a non-trivial inheritance hierarchy
+        if len(ancestors) > 1:
+            self.add_message(
+                'too-many-ancestors',
+                node=node,
+                args=(len(ancestors), self.linter.config.max_parents),
+                confidence=HIGH,
+            )
+
+        # Count the number of instance attributes
+        instance_attrs = list(node.instance_attrs.keys())
+        if len(instance_attrs) > self.linter.config.max_attributes:
+            self.add_message(
+                'too-many-instance-attributes',
+                node=node,
+                args=(len(instance_attrs), self.linter.config.max_attributes),
+                confidence=HIGH,
+            )
 
     @only_required_for_messages('too-few-public-methods', 'too-many-public-methods')
     def leave_classdef(self, node: nodes.ClassDef) -> None:
         """Check number of public methods."""
-        pass
+        if _is_exempt_from_public_methods(node):
+            return
+
+        if not any(
+            isinstance(ancestor, astroid.scoped_nodes.ClassDef)
+            and ancestor.name in self.linter.config.exclude_too_few_public_methods
+            for ancestor in node.ancestors()
+        ):
+            public_methods = [
+                method
+                for method in node.mymethods()
+                if not method.name.startswith("_") and method.type == "method"
+            ]
+            if len(public_methods) == 0 and len(node.instance_attrs) == 0:
+                self.add_message('too-few-public-methods', node=node, confidence=HIGH)
+            elif len(public_methods) > self.linter.config.max_public_methods:
+                self.add_message(
+                    'too-many-public-methods',
+                    node=node,
+                    args=(len(public_methods), self.linter.config.max_public_methods),
+                    confidence=HIGH,
+                )
 
     @only_required_for_messages('too-many-return-statements', 'too-many-branches', 'too-many-arguments', 'too-many-locals', 'too-many-statements', 'keyword-arg-before-vararg')
     def visit_functiondef(self, node: nodes.FunctionDef) -> None:
         """Check function name, docstring, arguments, redefinition,
         variable names, max locals.
         """
-        pass
+        # Check the number of arguments
+        args = node.args.args
+        if args is not None:
+            ignored_argument_names = self.linter.config.ignored_argument_names
+            args = [arg for arg in args if not ignored_argument_names.match(arg.name)]
+            if len(args) > self.linter.config.max_args:
+                self.add_message(
+                    'too-many-arguments',
+                    node=node,
+                    args=(len(args), self.linter.config.max_args),
+                    confidence=HIGH,
+                )
+
+        # Check if there's a keyword argument before a variable argument
+        if node.args.kwarg and node.args.vararg:
+            if node.args.kwarg.lineno < node.args.vararg.lineno:
+                self.add_message('keyword-arg-before-vararg', node=node, confidence=HIGH)
+
+        # init function specific checks
+        if node.name == '__init__':
+            self._check_init_function(node)
+        else:
+            self._check_function(node)
     visit_asyncfunctiondef = visit_functiondef
 
     @only_required_for_messages('too-many-return-statements', 'too-many-branches', 'too-many-arguments', 'too-many-locals', 'too-many-statements')
@@ -95,39 +189,104 @@ class MisdesignChecker(BaseChecker):
         """Most of the work is done here on close:
         checks for max returns, branch, return in __init__.
         """
-        pass
+        returns = self._returns.pop()
+        if returns > self.linter.config.max_returns:
+            self.add_message(
+                'too-many-return-statements',
+                node=node,
+                args=(returns, self.linter.config.max_returns),
+                confidence=HIGH,
+            )
+        branches = self._branches[node]
+        if branches > self.linter.config.max_branches:
+            self.add_message(
+                'too-many-branches',
+                node=node,
+                args=(branches, self.linter.config.max_branches),
+                confidence=HIGH,
+            )
+        # check number of local variables
+        locals_count = len(node.locals)
+        if locals_count > self.linter.config.max_locals:
+            self.add_message(
+                'too-many-locals',
+                node=node,
+                args=(locals_count, self.linter.config.max_locals),
+                confidence=HIGH,
+            )
+        statements = self._stmts.pop()
+        if statements > self.linter.config.max_statements:
+            self.add_message(
+                'too-many-statements',
+                node=node,
+                args=(statements, self.linter.config.max_statements),
+                confidence=HIGH,
+            )
     leave_asyncfunctiondef = leave_functiondef
 
     def visit_return(self, _: nodes.Return) -> None:
         """Count number of returns."""
-        pass
+        if not self._returns:
+            self._returns.append(1)
+        else:
+            self._returns[-1] += 1
 
     def visit_default(self, node: nodes.NodeNG) -> None:
         """Default visit method -> increments the statements counter if
         necessary.
         """
-        pass
+        if isinstance(node, nodes.Statement):
+            if not self._stmts:
+                self._stmts.append(1)
+            else:
+                self._stmts[-1] += 1
 
     def visit_try(self, node: nodes.Try) -> None:
         """Increments the branches counter."""
-        pass
+        self._inc_branch(node)
+        # try considered as one branch
+        self._inc_branch(node, 1)
+        # one branch for each except
+        self._inc_branch(node, len(node.handlers))
+        # finally
+        if node.finalbody:
+            self._inc_branch(node, 1)
 
     @only_required_for_messages('too-many-boolean-expressions', 'too-many-branches')
     def visit_if(self, node: nodes.If) -> None:
         """Increments the branches counter and checks boolean expressions."""
-        pass
+        self._inc_branch(node)
+        self._inc_branch(node, 2)
+        # if there is an elif: go through all elif
+        if node.orelse and len(node.orelse) == 1 and isinstance(node.orelse[0], nodes.If):
+            self._inc_branch(node, len(list(node.orelse[0].nodes_of_class(nodes.If))) + 1)
+        self._check_boolean_expressions(node)
 
     def _check_boolean_expressions(self, node: nodes.If) -> None:
         """Go through "if" node `node` and count its boolean expressions
         if the 'if' node test is a BoolOp node.
         """
-        pass
+        condition = node.test
+        if isinstance(condition, nodes.BoolOp):
+            nb_bool_expr = _count_boolean_expressions(condition)
+            if nb_bool_expr > self.linter.config.max_bool_expr:
+                self.add_message(
+                    'too-many-boolean-expressions',
+                    node=condition,
+                    args=(nb_bool_expr, self.linter.config.max_bool_expr),
+                    confidence=HIGH,
+                )
 
     def visit_while(self, node: nodes.While) -> None:
         """Increments the branches counter."""
-        pass
+        self._inc_branch(node)
+        self._inc_branch(node, 2)
     visit_for = visit_while
 
     def _inc_branch(self, node: nodes.NodeNG, branchesnum: int=1) -> None:
         """Increments the branches counter."""
-        pass
+        parent = node.parent
+        while parent and not isinstance(parent, (nodes.FunctionDef, nodes.AsyncFunctionDef)):
+            parent = parent.parent
+        if parent:
+            self._branches[parent] += branchesnum
