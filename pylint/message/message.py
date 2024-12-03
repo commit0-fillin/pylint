@@ -44,4 +44,4 @@ class Message:
         The template format is the one of the format method :
         cf. https://docs.python.org/2/library/string.html#formatstrings
         """
-        pass
+        return template.format(**asdict(self))
