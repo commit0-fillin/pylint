@@ -21,28 +21,38 @@ class BaseWriter:
         try to call 'stream.write' with it, but give it back encoded using
         the given encoding if it fails
         """
-        pass
+        self.encoding = encoding
+        self.out = StringIO()
+        self.begin_format()
+        layout.accept(self)
+        self.end_format()
+        string = self.out.getvalue()
+        if encoding is not None:
+            string = string.encode(encoding)
+        stream.write(string)
 
     def format_children(self, layout: EvaluationSection | Paragraph | Section) -> None:
         """Recurse on the layout children and call their accept method
         (see the Visitor pattern).
         """
-        pass
+        for child in layout.children:
+            child.accept(self)
 
     def writeln(self, string: str='') -> None:
         """Write a line in the output buffer."""
-        pass
+        self.write(string + '\n')
 
     def write(self, string: str) -> None:
         """Write a string in the output buffer."""
-        pass
+        self.out.write(string)
 
     def begin_format(self) -> None:
         """Begin to format a layout."""
-        pass
+        self.section = 0
 
     def end_format(self) -> None:
         """Finished formatting a layout."""
+        # This method can be left empty as it's meant to be overridden in subclasses if needed
         pass
 
     def get_table_content(self, table: Table) -> list[list[str]]:
@@ -50,7 +60,12 @@ class BaseWriter:
 
         return an aligned list of lists containing table cells values as string
         """
-        pass
+        result = []
+        for row in table.children:
+            if not row.children:
+                continue
+            result.append(list(self.compute_content(child) for child in row.children))
+        return result
 
     def compute_content(self, layout: BaseLayout) -> Iterator[str]:
         """Trick to compute the formatting of children layout before actually
@@ -58,4 +73,12 @@ class BaseWriter:
 
         return an iterator on strings (one for each child element)
         """
-        pass
+        old_out = self.out
+        old_section = self.section
+        self.out = StringIO()
+        self.section = 0
+        layout.accept(self)
+        self.section = old_section
+        content = self.out.getvalue()
+        self.out = old_out
+        return (line.strip() for line in content.splitlines())
