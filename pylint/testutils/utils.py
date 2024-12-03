@@ -10,7 +10,15 @@ from typing import TextIO
 @contextlib.contextmanager
 def _patch_streams(out: TextIO) -> Iterator[None]:
     """Patch and subsequently reset a text stream."""
-    pass
+    old_stdout = sys.stdout
+    old_stderr = sys.stderr
+    sys.stdout = out
+    sys.stderr = out
+    try:
+        yield
+    finally:
+        sys.stdout = old_stdout
+        sys.stderr = sys.stderr
 
 def create_files(paths: list[str], chroot: str='.') -> None:
     """Creates directories and files found in <path>.
@@ -31,4 +39,11 @@ def create_files(paths: list[str], chroot: str='.') -> None:
     >>> isfile('/tmp/a/b/foo.py')
     True
     """
-    pass
+    root = Path(chroot)
+    for path in paths:
+        full_path = root / path
+        if path.endswith('/'):
+            full_path.mkdir(parents=True, exist_ok=True)
+        else:
+            full_path.parent.mkdir(parents=True, exist_ok=True)
+            full_path.touch()
