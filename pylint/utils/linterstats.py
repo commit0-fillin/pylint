@@ -88,72 +88,131 @@ class LinterStats:
         """Use through PyLinter.set_current_module so PyLinter.current_name is
         consistent.
         """
-        pass
+        if module_name not in self.by_module:
+            self.by_module[module_name] = ModuleStats(
+                convention=0, error=0, fatal=0, info=0, refactor=0, statement=0, warning=0
+            )
 
     def get_bad_names(self, node_name: Literal['argument', 'attr', 'class', 'class_attribute', 'class_const', 'const', 'inlinevar', 'function', 'method', 'module', 'variable', 'typevar', 'typealias']) -> int:
         """Get a bad names node count."""
-        pass
+        return self.bad_names.get(node_name, 0)
 
     def increase_bad_name(self, node_name: str, increase: int) -> None:
         """Increase a bad names node count."""
-        pass
+        if node_name in self.bad_names:
+            self.bad_names[node_name] += increase
 
     def reset_bad_names(self) -> None:
         """Resets the bad_names attribute."""
-        pass
+        self.bad_names = BadNames(argument=0, attr=0, klass=0, class_attribute=0, class_const=0, const=0, inlinevar=0, function=0, method=0, module=0, variable=0, typevar=0, typealias=0)
 
     def get_code_count(self, type_name: Literal['code', 'comment', 'docstring', 'empty', 'total']) -> int:
         """Get a code type count."""
-        pass
+        return self.code_type_count.get(type_name, 0)
 
     def reset_code_count(self) -> None:
         """Resets the code_type_count attribute."""
-        pass
+        self.code_type_count = CodeTypeCount(code=0, comment=0, docstring=0, empty=0, total=0)
 
     def reset_duplicated_lines(self) -> None:
         """Resets the duplicated_lines attribute."""
-        pass
+        self.duplicated_lines = DuplicatedLines(nb_duplicated_lines=0, percent_duplicated_lines=0.0)
+        self.nb_duplicated_lines = 0
+        self.percent_duplicated_lines = 0.0
 
     def get_node_count(self, node_name: Literal['function', 'class', 'method', 'module']) -> int:
         """Get a node count while handling some extra conditions."""
-        pass
+        if node_name == 'class':
+            return self.node_count['klass']
+        return self.node_count.get(node_name, 0)
 
     def reset_node_count(self) -> None:
         """Resets the node count attribute."""
-        pass
+        self.node_count = NodeCount(function=0, klass=0, method=0, module=0)
 
     def get_undocumented(self, node_name: Literal['function', 'class', 'method', 'module']) -> float:
         """Get a undocumented node count."""
-        pass
+        if node_name == 'class':
+            return self.undocumented['klass']
+        return self.undocumented.get(node_name, 0)
 
     def reset_undocumented(self) -> None:
         """Resets the undocumented attribute."""
-        pass
+        self.undocumented = UndocumentedNodes(function=0, klass=0, method=0, module=0)
 
     def get_global_message_count(self, type_name: str) -> int:
         """Get a global message count."""
-        pass
+        return getattr(self, type_name, 0)
 
     def get_module_message_count(self, modname: str, type_name: MessageTypesFullName) -> int:
         """Get a module message count."""
-        pass
+        return self.by_module.get(modname, {}).get(type_name, 0)
 
     def increase_single_message_count(self, type_name: str, increase: int) -> None:
         """Increase the message type count of an individual message type."""
-        pass
+        setattr(self, type_name, getattr(self, type_name, 0) + increase)
 
     def increase_single_module_message_count(self, modname: str, type_name: MessageTypesFullName, increase: int) -> None:
         """Increase the message type count of an individual message type of a
         module.
         """
-        pass
+        if modname not in self.by_module:
+            self.by_module[modname] = ModuleStats(convention=0, error=0, fatal=0, info=0, refactor=0, statement=0, warning=0)
+        self.by_module[modname][type_name] += increase
 
     def reset_message_count(self) -> None:
         """Resets the message type count of the stats object."""
-        pass
+        self.convention = 0
+        self.error = 0
+        self.fatal = 0
+        self.info = 0
+        self.refactor = 0
+        self.warning = 0
+        self.by_module.clear()
 
 def merge_stats(stats: list[LinterStats]) -> LinterStats:
     """Used to merge multiple stats objects into a new one when pylint is run in
     parallel mode.
     """
-    pass
+    merged = LinterStats()
+    for stat in stats:
+        for attr, value in stat.bad_names.items():
+            merged.bad_names[attr] += value
+        for module, module_stats in stat.by_module.items():
+            if module not in merged.by_module:
+                merged.by_module[module] = ModuleStats(**module_stats)
+            else:
+                for msg_type, count in module_stats.items():
+                    merged.by_module[module][msg_type] += count
+        for msg, count in stat.by_msg.items():
+            merged.by_msg[msg] = merged.by_msg.get(msg, 0) + count
+        for code_type, count in stat.code_type_count.items():
+            merged.code_type_count[code_type] += count
+        for module, deps in stat.dependencies.items():
+            if module not in merged.dependencies:
+                merged.dependencies[module] = set(deps)
+            else:
+                merged.dependencies[module].update(deps)
+        merged.duplicated_lines['nb_duplicated_lines'] += stat.duplicated_lines['nb_duplicated_lines']
+        merged.duplicated_lines['percent_duplicated_lines'] += stat.duplicated_lines['percent_duplicated_lines']
+        for node_type, count in stat.node_count.items():
+            merged.node_count[node_type] += count
+        for node_type, count in stat.undocumented.items():
+            merged.undocumented[node_type] += count
+        merged.convention += stat.convention
+        merged.error += stat.error
+        merged.fatal += stat.fatal
+        merged.info += stat.info
+        merged.refactor += stat.refactor
+        merged.statement += stat.statement
+        merged.warning += stat.warning
+        merged.global_note += stat.global_note
+        merged.nb_duplicated_lines += stat.nb_duplicated_lines
+        merged.percent_duplicated_lines += stat.percent_duplicated_lines
+    
+    # Calculate average for percent_duplicated_lines
+    if stats:
+        merged.percent_duplicated_lines /= len(stats)
+        merged.duplicated_lines['percent_duplicated_lines'] /= len(stats)
+    
+    return merged
