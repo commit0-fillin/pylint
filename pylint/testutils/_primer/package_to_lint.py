@@ -42,12 +42,13 @@ class PackageToLint:
     @property
     def clone_directory(self) -> Path:
         """Directory to clone repository into."""
-        pass
+        repo_name = self.url.split('/')[-1].replace('.git', '')
+        return PRIMER_DIRECTORY_PATH / repo_name
 
     @property
     def paths_to_lint(self) -> list[str]:
         """The paths we need to lint."""
-        pass
+        return [str(self.clone_directory / directory) for directory in self.directories]
 
     def lazy_clone(self) -> str:
         """Concatenates the target directory and clones the file.
@@ -58,4 +59,19 @@ class PackageToLint:
         we'll probably notice because we'll have a fatal when launching the
         primer locally.
         """
-        pass
+        if not self.clone_directory.exists():
+            logging.info("Cloning %s", self.url)
+            Repo.clone_from(self.url, self.clone_directory, branch=self.branch)
+        else:
+            logging.info("Repository already cloned, pulling latest changes")
+            repo = Repo(self.clone_directory)
+            try:
+                repo.git.pull()
+            except GitCommandError:
+                raise DirtyPrimerDirectoryException(self.clone_directory)
+
+        if self.commit:
+            repo = Repo(self.clone_directory)
+            repo.git.checkout(self.commit)
+
+        return str(self.clone_directory)
