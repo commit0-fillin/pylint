@@ -108,7 +108,15 @@ class PyLinter(_ArgumentsManager, _MessageStateHandler, reporters.ReportsHandler
         If `force` is True (useful when multiprocessing), then the plugin is
         reloaded regardless if an entry exists in self._dynamic_plugins.
         """
-        pass
+        for modname in modnames:
+            if modname in self._dynamic_plugins and not force:
+                continue
+            try:
+                module = utils.load_module_from_modpath(modname.split('.'))
+                self._dynamic_plugins[modname] = module
+                self.register_plugin(module)
+            except Exception as e:
+                self._dynamic_plugins[modname] = e
 
     def load_plugin_configuration(self) -> None:
         """Call the configuration hook for plugins.
@@ -126,23 +134,37 @@ class PyLinter(_ArgumentsManager, _MessageStateHandler, reporters.ReportsHandler
             in GitHub issue #7264. Making it use the stored result is more efficient, and
             means that we avoid the ``init-hook`` problems from before.
         """
-        pass
+        for plugin_name, plugin in self._dynamic_plugins.items():
+            if isinstance(plugin, ModuleType):
+                if hasattr(plugin, 'load_configuration'):
+                    plugin.load_configuration(self)
+            elif isinstance(plugin, Exception):
+                print(f"Failed to load plugin {plugin_name}: {str(plugin)}", file=sys.stderr)
 
     def _load_reporters(self, reporter_names: str) -> None:
         """Load the reporters if they are available on _reporters."""
-        pass
+        for reporter_name in reporter_names.split(','):
+            reporter_name = reporter_name.strip()
+            if reporter_name in self._reporters:
+                self.set_reporter(self._reporters[reporter_name]())
+            else:
+                raise exceptions.InvalidReporterError(reporter_name)
 
     def set_reporter(self, reporter: reporters.BaseReporter | reporters.MultiReporter) -> None:
         """Set the reporter used to display messages and reports."""
-        pass
+        self.reporter = reporter
+        self.reporter.linter = self
 
     def register_reporter(self, reporter_class: type[reporters.BaseReporter]) -> None:
         """Registers a reporter class on the _reporters attribute."""
-        pass
+        self._reporters[reporter_class.name] = reporter_class
 
     def register_checker(self, checker: checkers.BaseChecker) -> None:
         """This method auto registers the checker."""
-        pass
+        self._checkers[checker.name].append(checker)
+        for message in checker.messages:
+            self.msgs_store.register_message(message)
+        checker.load_defaults()
 
     def enable_fail_on_messages(self) -> None:
         """Enable 'fail on' msgs.
