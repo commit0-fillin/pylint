@@ -18,7 +18,19 @@ class FunctionChecker(_BasicChecker):
         :param node: FunctionDef node to check
         :type node: nodes.FunctionDef
         """
-        pass
+        if not node.is_generator():
+            return
+
+        yield_nodes = list(node.nodes_of_class(nodes.Yield))
+        if not yield_nodes:
+            return
+
+        if self._node_fails_contextmanager_cleanup(node, yield_nodes):
+            self.add_message(
+                'contextmanager-generator-missing-cleanup',
+                node=node,
+                args=(node.name,)
+            )
 
     @staticmethod
     def _node_fails_contextmanager_cleanup(node: nodes.FunctionDef, yield_nodes: list[nodes.Yield]) -> bool:
@@ -36,4 +48,27 @@ class FunctionChecker(_BasicChecker):
         :type yield_nodes: list[nodes.Yield]
         :rtype: bool
         """
-        pass
+        if not yield_nodes:
+            return False
+
+        first_yield = yield_nodes[0]
+        if isinstance(first_yield.value, nodes.Const):
+            return False
+
+        try_finally = next(node.nodes_of_class(nodes.TryFinally), None)
+        if try_finally:
+            # Check if GeneratorExit is caught in the try block
+            for handler in try_finally.handlers:
+                if handler.type and handler.type.name == 'GeneratorExit':
+                    return False
+            
+            # Check if there's any cleanup in the finally block
+            if try_finally.finalbody:
+                return False
+
+        # Check if there are any statements after the yield
+        yield_index = node.body.index(first_yield)
+        if yield_index < len(node.body) - 1:
+            return True
+
+        return False
