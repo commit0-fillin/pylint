@@ -18,20 +18,34 @@ class UnsupportedVersionChecker(BaseChecker):
 
     def open(self) -> None:
         """Initialize visit variables and statistics."""
-        pass
+        self.py_version = self.linter.config.py_version
 
     @only_required_for_messages('using-f-string-in-unsupported-version')
     def visit_joinedstr(self, node: nodes.JoinedStr) -> None:
         """Check f-strings."""
-        pass
+        if self.py_version < (3, 6):
+            self.add_message('using-f-string-in-unsupported-version', node=node)
 
     @only_required_for_messages('using-final-decorator-in-unsupported-version')
     def visit_decorators(self, node: nodes.Decorators) -> None:
         """Check decorators."""
-        pass
+        for decorator in node.nodes:
+            if self._check_typing_final(decorator):
+                self.add_message('using-final-decorator-in-unsupported-version', node=decorator)
 
-    def _check_typing_final(self, node: nodes.Decorators) -> None:
-        """Add a message when the `typing.final` decorator is used and the
+    def _check_typing_final(self, node: nodes.NodeNG) -> bool:
+        """Check if the node is a `typing.final` decorator and the
         py-version is lower than 3.8.
         """
-        pass
+        if self.py_version >= (3, 8):
+            return False
+
+        if isinstance(node, nodes.Name) and node.name == 'final':
+            return node.root().name in ('typing', 'typing_extensions')
+        if isinstance(node, nodes.Attribute) and node.attrname == 'final':
+            expr = node.expr
+            return (
+                isinstance(expr, nodes.Name)
+                and expr.name in ('typing', 'typing_extensions')
+            )
+        return False
