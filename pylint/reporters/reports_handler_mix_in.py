@@ -22,7 +22,7 @@ class ReportsHandlerMixIn:
 
     def report_order(self) -> MutableSequence[BaseChecker]:
         """Return a list of reporters."""
-        pass
+        return sorted(self.get_checkers(), key=lambda x: getattr(x, 'name', ''))
 
     def register_report(self, reportid: str, r_title: str, r_cb: ReportsCallable, checker: BaseChecker) -> None:
         """Register a report.
@@ -32,20 +32,34 @@ class ReportsHandlerMixIn:
         :param r_cb: The method to call to make the report
         :param checker: The checker defining the report
         """
-        pass
+        self._reports[checker].append((reportid, r_title, r_cb))
 
     def enable_report(self, reportid: str) -> None:
         """Enable the report of the given id."""
-        pass
+        self._reports_state[reportid] = True
 
     def disable_report(self, reportid: str) -> None:
         """Disable the report of the given id."""
-        pass
+        self._reports_state[reportid] = False
 
     def report_is_enabled(self, reportid: str) -> bool:
         """Is the report associated to the given identifier enabled ?"""
-        pass
+        return self._reports_state.get(reportid, True)
 
     def make_reports(self: PyLinter, stats: LinterStats, old_stats: LinterStats | None) -> Section:
         """Render registered reports."""
-        pass
+        sect = Section('Report')
+        for checker in self.report_order():
+            for reportid, r_title, r_cb in self._reports.get(checker, []):
+                if not self.report_is_enabled(reportid):
+                    continue
+                report_sect = Section(r_title)
+                try:
+                    r_cb(report_sect, stats, old_stats)
+                except Exception:
+                    # TODO: handle this better
+                    import traceback
+                    traceback.print_exc()
+                else:
+                    sect.append(report_sect)
+        return sect
