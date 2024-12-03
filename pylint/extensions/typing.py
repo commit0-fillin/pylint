@@ -42,7 +42,7 @@ class TypingChecker(BaseChecker):
 
     def _msg_postponed_eval_hint(self, node: nodes.NodeNG) -> str:
         """Message hint if postponed evaluation isn't enabled."""
-        pass
+        return "" if is_postponed_evaluation_enabled(node) else " (Requires Python 3.7+ with postponed evaluation)"
 
     def _check_for_alternative_union_syntax(self, node: nodes.Name | nodes.Attribute, name: str) -> None:
         """Check if alternative union syntax could be used.
@@ -52,7 +52,17 @@ class TypingChecker(BaseChecker):
         - OR: Python 3.7+ with postponed evaluation in
               a type annotation context
         """
-        pass
+        if not self._should_check_alternative_union_syntax:
+            return
+
+        if name not in UNION_NAMES:
+            return
+
+        if not is_node_in_type_annotation_context(node):
+            return
+
+        hint = self._msg_postponed_eval_hint(node)
+        self.add_message("consider-alternative-union-syntax", node=node, args=(name, hint))
 
     def _check_for_typing_alias(self, node: nodes.Name | nodes.Attribute) -> None:
         """Check if typing alias is deprecated or could be replaced.
@@ -66,7 +76,41 @@ class TypingChecker(BaseChecker):
             any name collisions, only ever used in a type annotation
             context, and can safely be replaced.
         """
-        pass
+        if not self._should_check_typing_alias:
+            return
+
+        if isinstance(node, nodes.Name):
+            name = node.name
+        else:
+            name = node.attrname
+
+        if name not in ALIAS_NAMES:
+            return
+
+        inferred = safe_infer(node)
+        if not inferred:
+            return
+
+        qname = inferred.qname()
+        if qname not in DEPRECATED_TYPING_ALIASES:
+            return
+
+        alias = DEPRECATED_TYPING_ALIASES[qname]
+        if alias.name_collision:
+            self._alias_name_collisions.add(alias.name)
+
+        parent_subscript = isinstance(node.parent, nodes.Subscript)
+        msg = DeprecatedTypingAliasMsg(node, qname, alias.name, parent_subscript)
+
+        if self.linter.is_message_enabled("deprecated-typing-alias"):
+            self.add_message(
+                "deprecated-typing-alias",
+                node=node,
+                args=(qname, alias.name),
+                confidence=INFERENCE,
+            )
+        elif self.linter.is_message_enabled("consider-using-alias"):
+            self._consider_using_alias_msgs.append(msg)
 
     @only_required_for_messages('consider-using-alias', 'deprecated-typing-alias')
     def leave_module(self, node: nodes.Module) -> None:
@@ -79,12 +123,41 @@ class TypingChecker(BaseChecker):
 
     def _check_broken_noreturn(self, node: nodes.Name | nodes.Attribute) -> None:
         """Check for 'NoReturn' inside compound types."""
-        pass
+        if not isinstance(node.parent, (nodes.Subscript, nodes.BinOp)):
+            return
+
+        inferred = safe_infer(node)
+        if not inferred or inferred.qname() not in TYPING_NORETURN:
+            return
+
+        self.add_message("broken-noreturn", node=node)
 
     def _check_broken_callable(self, node: nodes.Name | nodes.Attribute) -> None:
         """Check for 'collections.abc.Callable' inside Optional and Union."""
-        pass
+        if self._found_broken_callable_location:
+            return
+
+        if not self._broken_callable_location(node):
+            return
+
+        inferred = safe_infer(node)
+        if not inferred or inferred.qname() != "collections.abc.Callable":
+            return
+
+        self.add_message("broken-collections-callable", node=node)
+        self._found_broken_callable_location = True
 
     def _broken_callable_location(self, node: nodes.Name | nodes.Attribute) -> bool:
         """Check if node would be a broken location for collections.abc.Callable."""
-        pass
+        parent = node.parent
+        if isinstance(parent, nodes.Subscript):
+            parent = parent.parent
+
+        if not isinstance(parent, nodes.Call):
+            return False
+
+        inferred = safe_infer(parent.func)
+        if not inferred:
+            return False
+
+        return inferred.qname() in ("typing.Optional", "typing.Union")
