@@ -25,19 +25,40 @@ class DotPrinter(Printer):
 
     def _open_graph(self) -> None:
         """Emit the header lines."""
-        pass
+        self.lines.append(f'digraph "{self.title}" {{')
+        self.lines.append(f'    charset="{self.charset}";')
+        if self.layout:
+            self.lines.append(f'    rankdir={self.layout.value};')
+        self._inc_indent()
 
     def emit_node(self, name: str, type_: NodeType, properties: NodeProperties | None=None) -> None:
         """Create a new node.
 
         Nodes can be classes, packages, participants etc.
         """
-        pass
+        node_str = f'{self._indent}"{name}" ['
+        attrs = [f'shape="{SHAPES[type_]}"']
+        if properties:
+            if properties.label:
+                attrs.append(f'label="{properties.label}"')
+            if properties.color:
+                attrs.append(f'color="{properties.color}"')
+            if properties.fontcolor:
+                attrs.append(f'fontcolor="{properties.fontcolor}"')
+        node_str += ', '.join(attrs) + '];'
+        self.lines.append(node_str)
 
     def emit_edge(self, from_node: str, to_node: str, type_: EdgeType, label: str | None=None) -> None:
         """Create an edge from one node to another to display relationships."""
-        pass
+        edge_str = f'{self._indent}"{from_node}" -> "{to_node}"'
+        attrs = ARROWS[type_].copy()
+        if label:
+            attrs['label'] = f'"{label}"'
+        attr_str = ', '.join(f'{k}={v}' for k, v in attrs.items())
+        edge_str += f' [{attr_str}];'
+        self.lines.append(edge_str)
 
     def _close_graph(self) -> None:
         """Emit the lines needed to properly close the graph."""
-        pass
+        self._dec_indent()
+        self.lines.append('}')
