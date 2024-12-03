@@ -11,7 +11,14 @@ from pylint.constants import PYLINT_HOME, full_version
 @contextlib.contextmanager
 def augmented_sys_path(additional_paths: Sequence[str]) -> Iterator[None]:
     """Augment 'sys.path' by adding non-existent entries from additional_paths."""
-    pass
+    original_sys_path = sys.path.copy()
+    try:
+        for path in additional_paths:
+            if path not in sys.path:
+                sys.path.insert(0, path)
+        yield
+    finally:
+        sys.path[:] = original_sys_path
 
 def _is_relative_to(self: Path, *other: Path) -> bool:
     """Checks if self is relative to other.
@@ -19,4 +26,8 @@ def _is_relative_to(self: Path, *other: Path) -> bool:
     Backport of pathlib.Path.is_relative_to for Python <3.9
     TODO: py39: Remove this backport and use stdlib function.
     """
-    pass
+    try:
+        self.relative_to(*other)
+        return True
+    except ValueError:
+        return False
