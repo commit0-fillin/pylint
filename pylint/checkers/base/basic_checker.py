@@ -30,7 +30,21 @@ def report_by_type_stats(sect: reporter_nodes.Section, stats: LinterStats, old_s
     * percentage of different types documented
     * percentage of different types with a bad name
     """
-    pass
+    type_stats = sect.add_table(["type", "number", "old number", "documented", "badname"])
+    for node_type in ("module", "class", "method", "function"):
+        total = stats.get_node_count(node_type)
+        old_total = old_stats.get_node_count(node_type) if old_stats else None
+        documented = stats.get_documented_node_count(node_type)
+        percent_documented = 100.0 * documented / total if total else 0
+        badname = stats.get_bad_names_node_count(node_type)
+        percent_badname = 100.0 * badname / total if total else 0
+        type_stats.append_row([
+            node_type,
+            str(total),
+            str(old_total) if old_total is not None else "NC",
+            f"{percent_documented:.2f}% ({documented}/{total})",
+            f"{percent_badname:.2f}% ({badname}/{total})",
+        ])
 
 class BasicChecker(_BasicChecker):
     """Basic checker.
@@ -54,24 +68,93 @@ class BasicChecker(_BasicChecker):
 
     def open(self) -> None:
         """Initialize visit variables and statistics."""
-        pass
+        self._tryfinally = []
+        self._init_variables()
+        self._init_statistics()
+
+    def _init_variables(self) -> None:
+        self._return_nodes = []
+        self._continue_nodes = []
+        self._break_nodes = []
+        self._raise_nodes = []
+
+    def _init_statistics(self) -> None:
+        self.stats = {
+            'statement': 0,
+            'function': 0,
+            'class': 0,
+            'method': 0,
+            'module': 0,
+        }
 
     @staticmethod
     def _name_holds_generator(test: nodes.Name) -> tuple[bool, nodes.Call | None]:
         """Return whether `test` tests a name certain to hold a generator, or optionally
         a call that should be then tested to see if *it* returns only generators.
         """
-        pass
+        if not isinstance(test, nodes.Name):
+            return False, None
+        
+        inferred = safe_infer(test)
+        if inferred is None:
+            return False, None
+        
+        if isinstance(inferred, astroid.Generator):
+            return True, None
+        
+        if isinstance(inferred, astroid.FunctionDef):
+            if inferred.is_generator():
+                return True, None
+            if isinstance(test.parent, nodes.Call):
+                return False, test.parent
+        
+        return False, None
 
-    def visit_module(self, _: nodes.Module) -> None:
+    def visit_module(self, node: nodes.Module) -> None:
         """Check module name, docstring and required arguments."""
-        pass
+        self.stats['module'] += 1
+        self._check_module_name(node)
+        self._check_module_docstring(node)
+        self._check_required_attributes(node)
 
-    def visit_classdef(self, _: nodes.ClassDef) -> None:
-        """Check module name, docstring and redefinition
+    def _check_module_name(self, node: nodes.Module) -> None:
+        if not node.name:
+            return
+        if not node.name.isidentifier():
+            self.add_message('invalid-name', node=node, args=(node.name,))
+
+    def _check_module_docstring(self, node: nodes.Module) -> None:
+        if not node.doc:
+            self.add_message('missing-module-docstring', node=node)
+
+    def _check_required_attributes(self, node: nodes.Module) -> None:
+        required_attributes = self.config.required_attributes
+        for attr in required_attributes:
+            if not hasattr(node, attr):
+                self.add_message('missing-required-attribute', node=node, args=(attr,))
+
+    def visit_classdef(self, node: nodes.ClassDef) -> None:
+        """Check class name, docstring and redefinition
         increment branch counter.
         """
-        pass
+        self.stats['class'] += 1
+        self._check_class_name(node)
+        self._check_class_docstring(node)
+        self._check_class_redefinition(node)
+        self.stats['statement'] += 1
+
+    def _check_class_name(self, node: nodes.ClassDef) -> None:
+        if not node.name.isidentifier():
+            self.add_message('invalid-name', node=node, args=(node.name,))
+
+    def _check_class_docstring(self, node: nodes.ClassDef) -> None:
+        if not node.doc and not node.is_protocol():
+            self.add_message('missing-class-docstring', node=node)
+
+    def _check_class_redefinition(self, node: nodes.ClassDef) -> None:
+        defined = node.parent.scope().lookup(node.name)
+        if defined and defined[1][-1].lineno < node.lineno:
+            self.add_message('redefined-outer-name', node=node, args=(node.name,))
 
     @utils.only_required_for_messages('pointless-statement', 'pointless-exception-statement', 'pointless-string-statement', 'expression-not-assigned', 'named-expr-without-context')
     def visit_expr(self, node: nodes.Expr) -> None:
