@@ -75,7 +75,14 @@ class LintModuleTest:
         :returns: A dict mapping line,msg-symbol tuples to the count on this line.
         :rtype: dict
         """
-        pass
+        message_counter: MessageCounter = Counter()
+        for i, line in enumerate(stream, start=1):
+            match = _EXPECTED_RE.search(line)
+            if match:
+                line_num = int(match.group('line') or i)
+                msg_id = match.group('msg_id')
+                message_counter[(line_num, msg_id)] += 1
+        return message_counter
 
     @staticmethod
     def multiset_difference(expected_entries: MessageCounter, actual_entries: MessageCounter) -> tuple[MessageCounter, dict[tuple[int, str], int]]:
@@ -83,10 +90,24 @@ class LintModuleTest:
 
         A multiset is a dict with the cardinality of the key as the value.
         """
-        pass
+        missing_entries = Counter()
+        unexpected_entries = {}
+        for key, count in expected_entries.items():
+            if key not in actual_entries:
+                missing_entries[key] = count
+            elif actual_entries[key] < count:
+                missing_entries[key] = count - actual_entries[key]
+        for key, count in actual_entries.items():
+            if key not in expected_entries:
+                unexpected_entries[key] = count
+            elif count > expected_entries[key]:
+                unexpected_entries[key] = count - expected_entries[key]
+        return missing_entries, unexpected_entries
 
     def _check_output_text(self, _: MessageCounter, expected_output: list[OutputLine], actual_output: list[OutputLine]) -> None:
         """This is a function because we want to be able to update the text in
         LintModuleOutputUpdate.
         """
-        pass
+        assert len(expected_output) == len(actual_output)
+        for expected, actual in zip(expected_output, actual_output):
+            assert expected == actual, f"Expected: {expected}\nGot: {actual}"
