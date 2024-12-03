@@ -13,19 +13,38 @@ MOVED_TO_EXTENSIONS = {'https://pylint.readthedocs.io/en/latest/whatsnew/2/2.14/
 @lru_cache(maxsize=None)
 def is_deleted_symbol(symbol: str) -> str | None:
     """Return the explanation for removal if the message was removed."""
-    pass
+    for explanation, messages in DELETED_MESSAGES_IDS.items():
+        for message in messages:
+            if message.symbol == symbol or symbol in [old[1] for old in message.old_names]:
+                return explanation
+    return None
 
 @lru_cache(maxsize=None)
 def is_deleted_msgid(msgid: str) -> str | None:
     """Return the explanation for removal if the message was removed."""
-    pass
+    for prefix in DELETED_MSGID_PREFIXES:
+        if msgid.startswith(f"{prefix:02d}"):
+            return f"Message IDs starting with {prefix:02d} have been deleted."
+    for explanation, messages in DELETED_MESSAGES_IDS.items():
+        for message in messages:
+            if message.msgid == msgid or msgid in [old[0] for old in message.old_names]:
+                return explanation
+    return None
 
 @lru_cache(maxsize=None)
 def is_moved_symbol(symbol: str) -> str | None:
     """Return the explanation for moving if the message was moved to extensions."""
-    pass
+    for explanation, messages in MOVED_TO_EXTENSIONS.items():
+        for message in messages:
+            if message.symbol == symbol or symbol in [old[1] for old in message.old_names]:
+                return explanation
+    return None
 
 @lru_cache(maxsize=None)
 def is_moved_msgid(msgid: str) -> str | None:
     """Return the explanation for moving if the message was moved to extensions."""
-    pass
+    for explanation, messages in MOVED_TO_EXTENSIONS.items():
+        for message in messages:
+            if message.msgid == msgid or msgid in [old[0] for old in message.old_names]:
+                return explanation
+    return None
