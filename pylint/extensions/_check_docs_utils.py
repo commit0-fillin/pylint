@@ -16,7 +16,7 @@ def space_indentation(s: str) -> int:
     :rtype: int
     :return: number of leading spaces
     """
-    pass
+    return len(s) - len(s.lstrip())
 
 def get_setters_property_name(node: nodes.FunctionDef) -> str | None:
     """Get the name of the property that the given node is a setter for.
@@ -28,7 +28,14 @@ def get_setters_property_name(node: nodes.FunctionDef) -> str | None:
     :returns: The name of the property that the node is a setter for,
         or None if one could not be found.
     """
-    pass
+    if not node.decorators:
+        return None
+    
+    for decorator in node.decorators.nodes:
+        if isinstance(decorator, nodes.Attribute) and decorator.attrname == "setter":
+            return decorator.expr.name
+    
+    return None
 
 def get_setters_property(node: nodes.FunctionDef) -> nodes.FunctionDef | None:
     """Get the property node for the given setter node.
@@ -40,7 +47,21 @@ def get_setters_property(node: nodes.FunctionDef) -> nodes.FunctionDef | None:
     :returns: The node relating to the property of the given setter node,
         or None if one could not be found.
     """
-    pass
+    property_name = get_setters_property_name(node)
+    if property_name is None:
+        return None
+    
+    class_node = node.parent.frame()
+    if not isinstance(class_node, nodes.ClassDef):
+        return None
+    
+    for member in class_node.body:
+        if (isinstance(member, nodes.FunctionDef) and 
+            member.name == property_name and 
+            utils.decorated_with_property(member)):
+            return member
+    
+    return None
 
 def returns_something(return_node: nodes.Return) -> bool:
     """Check if a return node returns a value other than None.
@@ -52,7 +73,14 @@ def returns_something(return_node: nodes.Return) -> bool:
     :return: True if the return node returns a value other than None,
         False otherwise.
     """
-    pass
+    if return_node.value is None:
+        return False
+    
+    try:
+        value = next(return_node.value.infer())
+        return not (value is None or isinstance(value, nodes.Const) and value.value is None)
+    except astroid.InferenceError:
+        return True  # If we can't infer the value, assume it returns something
 
 def possible_exc_types(node: nodes.NodeNG) -> set[nodes.ClassDef]:
     """Gets all the possible raised exception types for the given raise node.
@@ -65,7 +93,20 @@ def possible_exc_types(node: nodes.NodeNG) -> set[nodes.ClassDef]:
 
     :returns: A list of exception types possibly raised by :param:`node`.
     """
-    pass
+    exc_types = set()
+    if isinstance(node, nodes.Raise):
+        if node.exc is None:
+            return exc_types
+        
+        for exc_type in node.exc.nodes_of_class(nodes.Name):
+            try:
+                inferred = next(exc_type.infer())
+                if isinstance(inferred, nodes.ClassDef) and utils.inherit_from_std_ex(inferred):
+                    exc_types.add(inferred)
+            except astroid.InferenceError:
+                continue
+    
+    return exc_types
 
 def _annotations_list(args_node: nodes.Arguments) -> list[nodes.NodeNG]:
     """Get a merged list of annotations.
@@ -79,7 +120,23 @@ def _annotations_list(args_node: nodes.Arguments) -> list[nodes.NodeNG]:
     :param args_node: The node to get the annotations for.
     :returns: The annotations.
     """
-    pass
+    annotations = []
+    
+    # Real type annotations
+    if args_node.annotations:
+        annotations.extend(args_node.annotations)
+    
+    # Type comment on the function
+    if args_node.parent and isinstance(args_node.parent, nodes.FunctionDef):
+        if args_node.parent.type_comment_args:
+            annotations.extend(args_node.parent.type_comment_args)
+    
+    # Type comment on individual arguments
+    for arg in args_node.args:
+        if arg.type_comment:
+            annotations.append(arg.type_comment)
+    
+    return annotations
 
 class Docstring:
     re_for_parameters_see = re.compile('\n        For\\s+the\\s+(other)?\\s*parameters\\s*,\\s+see\n        ', re.X | re.S)
@@ -95,7 +152,7 @@ class Docstring:
 
     def matching_sections(self) -> int:
         """Returns the number of matching docstring sections."""
-        pass
+        return 0  # Base Docstring class doesn't implement any specific matching
 
 class SphinxDocstring(Docstring):
     re_type = '\n        [~!.]?               # Optional link style prefix\n        \\w(?:\\w|\\.[^\\.])*    # Valid python name\n        '
@@ -116,7 +173,16 @@ class SphinxDocstring(Docstring):
 
     def matching_sections(self) -> int:
         """Returns the number of matching docstring sections."""
-        pass
+        count = 0
+        if self.re_param_in_docstring.search(self.doc):
+            count += 1
+        if self.re_raise_in_docstring.search(self.doc):
+            count += 1
+        if self.re_returns_in_docstring.search(self.doc):
+            count += 1
+        if self.supports_yields and self.re_yields_in_docstring.search(self.doc):
+            count += 1
+        return count
 
 class EpytextDocstring(SphinxDocstring):
     """Epytext is similar to Sphinx.
@@ -156,7 +222,16 @@ class GoogleDocstring(Docstring):
 
     def matching_sections(self) -> int:
         """Returns the number of matching docstring sections."""
-        pass
+        count = 0
+        if self.re_param_section.search(self.doc):
+            count += 1
+        if self.re_raise_section.search(self.doc):
+            count += 1
+        if self.re_returns_section.search(self.doc):
+            count += 1
+        if self.supports_yields and self.re_yields_section.search(self.doc):
+            count += 1
+        return count
 
 class NumpyDocstring(GoogleDocstring):
     _re_section_template = '\n        ^([ ]*)   {0}   \\s*?$          # Numpy parameters header\n        \\s*     [-=]+   \\s*?$          # underline\n        (  .* )                        # section\n    '
@@ -173,6 +248,23 @@ class NumpyDocstring(GoogleDocstring):
 
     def match_param_docs(self) -> tuple[set[str], set[str]]:
         """Matches parameter documentation section to parameter documentation rules."""
-        pass
+        params_with_doc = set()
+        params_with_type = set()
+
+        for match in self.re_param_section.finditer(self.doc):
+            section = match.group(2)
+            for line in section.splitlines():
+                match = self.re_param_line.match(line.strip())
+                if match:
+                    param_name = match.group('param_name')
+                    param_type = match.group('param_type')
+                    param_desc = match.group('param_desc')
+                    
+                    if param_desc:
+                        params_with_doc.add(param_name)
+                    if param_type:
+                        params_with_type.add(param_name)
+
+        return params_with_doc, params_with_type
 DOCSTRING_TYPES = {'sphinx': SphinxDocstring, 'epytext': EpytextDocstring, 'google': GoogleDocstring, 'numpy': NumpyDocstring, 'default': Docstring}
 'A map of the name of the docstring type to its class.\n\n:type: dict(str, type)\n'
