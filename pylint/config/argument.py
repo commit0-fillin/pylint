@@ -19,47 +19,61 @@ _ArgumentTypes = Union[str, int, float, bool, Pattern[str], Sequence[str], Seque
 
 def _confidence_transformer(value: str) -> Sequence[str]:
     """Transforms a comma separated string of confidence values."""
-    pass
+    return [v.strip().upper() for v in value.split(',') if v.strip()]
 
 def _csv_transformer(value: str) -> Sequence[str]:
     """Transforms a comma separated string."""
-    pass
+    return [v.strip() for v in value.split(',') if v.strip()]
 YES_VALUES = {'y', 'yes', 'true'}
 NO_VALUES = {'n', 'no', 'false'}
 
 def _yn_transformer(value: str) -> bool:
     """Transforms a yes/no or stringified bool into a bool."""
-    pass
+    value = value.lower()
+    if value in YES_VALUES:
+        return True
+    if value in NO_VALUES:
+        return False
+    raise ValueError(f"Invalid yes/no value: {value}")
 
 def _non_empty_string_transformer(value: str) -> str:
     """Check that a string is not empty and remove quotes."""
-    pass
+    value = value.strip()
+    if not value:
+        raise ValueError("Empty string is not allowed")
+    return pylint_utils._unquote(value)
 
 def _path_transformer(value: str) -> str:
     """Expand user and variables in a path."""
-    pass
+    return os.path.expandvars(os.path.expanduser(value))
 
 def _glob_paths_csv_transformer(value: str) -> Sequence[str]:
     """Transforms a comma separated list of paths while expanding user and
     variables and glob patterns.
     """
-    pass
+    paths = _csv_transformer(value)
+    expanded_paths = []
+    for path in paths:
+        expanded_path = _path_transformer(path)
+        expanded_paths.extend(glob(expanded_path, recursive=True))
+    return expanded_paths
 
 def _py_version_transformer(value: str) -> tuple[int, ...]:
     """Transforms a version string into a version tuple."""
-    pass
+    return tuple(int(part) for part in value.split('.'))
 
 def _regex_transformer(value: str) -> Pattern[str]:
     """Return `re.compile(value)`."""
-    pass
+    return re.compile(value)
 
 def _regexp_csv_transfomer(value: str) -> Sequence[Pattern[str]]:
     """Transforms a comma separated list of regular expressions."""
-    pass
+    return [_regex_transformer(v) for v in _csv_transformer(value)]
 
 def _regexp_paths_csv_transfomer(value: str) -> Sequence[Pattern[str]]:
     """Transforms a comma separated list of regular expressions paths."""
-    pass
+    paths = _glob_paths_csv_transformer(value)
+    return [re.compile(f"^{re.escape(path)}$") for path in paths]
 _TYPE_TRANSFORMERS: dict[str, Callable[[str], _ArgumentTypes]] = {'choice': str, 'csv': _csv_transformer, 'float': float, 'int': int, 'confidence': _confidence_transformer, 'non_empty_string': _non_empty_string_transformer, 'path': _path_transformer, 'glob_paths_csv': _glob_paths_csv_transformer, 'py_version': _py_version_transformer, 'regexp': _regex_transformer, 'regexp_csv': _regexp_csv_transfomer, 'regexp_paths_csv': _regexp_paths_csv_transfomer, 'string': pylint_utils._unquote, 'yn': _yn_transformer}
 'Type transformers for all argument types.\n\nA transformer should accept a string and return one of the supported\nArgument types. It will only be called when parsing 1) command-line,\n2) configuration files and 3) a string default value.\nNon-string default values are assumed to be of the correct type.\n'
 
