@@ -81,15 +81,24 @@ class BaseChecker(_ArgumentsProvider):
         :raises InvalidMessageError: If the checker id in the messages are not
         always the same.
         """
-        pass
+        checker_id = None
+        for msgid, _ in self.msgs.items():
+            if checker_id is None:
+                checker_id = msgid[:2]
+            elif msgid[:2] != checker_id:
+                raise InvalidMessageError(
+                    f"Inconsistent checker id in messages: {msgid[:2]} != {checker_id}"
+                )
 
     def open(self) -> None:
         """Called before visiting project (i.e. set of modules)."""
-        pass
+        # This method is intentionally left empty as it's meant to be
+        # overridden by subclasses if needed.
 
     def close(self) -> None:
         """Called after visiting project (i.e set of modules)."""
-        pass
+        # This method is intentionally left empty as it's meant to be
+        # overridden by subclasses if needed.
 
 class BaseTokenChecker(BaseChecker):
     """Base class for checkers that want to have access to the token stream."""
@@ -97,7 +106,7 @@ class BaseTokenChecker(BaseChecker):
     @abc.abstractmethod
     def process_tokens(self, tokens: list[TokenInfo]) -> None:
         """Should be overridden by subclasses."""
-        pass
+        raise NotImplementedError("This method must be overridden in derived classes.")
 
 class BaseRawFileChecker(BaseChecker):
     """Base class for checkers which need to parse the raw file."""
@@ -108,4 +117,4 @@ class BaseRawFileChecker(BaseChecker):
 
         The module's content is accessible via ``astroid.stream``
         """
-        pass
+        raise NotImplementedError("This method must be overridden in derived classes.")
