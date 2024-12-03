@@ -9,4 +9,7 @@ class CompareCommand(PrimerCommand):
 
     def _truncate_comment(self, comment: str) -> str:
         """GitHub allows only a set number of characters in a comment."""
-        pass
+        if len(comment) <= MAX_GITHUB_COMMENT_LENGTH:
+            return comment
+        truncated = comment[:MAX_GITHUB_COMMENT_LENGTH - 3] + "..."
+        return truncated
