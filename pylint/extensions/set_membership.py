@@ -16,4 +16,12 @@ class SetMembershipChecker(BaseChecker):
 
     def _check_in_comparison(self, comparator: nodes.NodeNG) -> None:
         """Checks for membership comparisons with in-place container objects."""
-        pass
+        if not isinstance(comparator, nodes.Compare):
+            return
+
+        if comparator.ops[0][0] not in ('in', 'not in'):
+            return
+
+        right = comparator.ops[0][1]
+        if isinstance(right, (nodes.List, nodes.Tuple)):
+            self.add_message('use-set-for-membership', node=comparator)
