@@ -24,15 +24,20 @@ class MessageDefinitionStore:
     @property
     def messages(self) -> ValuesView[MessageDefinition]:
         """The list of all active messages."""
-        pass
+        return self._messages_definitions.values()
 
     def register_messages_from_checker(self, checker: BaseChecker) -> None:
         """Register all messages definitions from a checker."""
-        pass
+        for message in checker.messages:
+            self.register_message(message)
 
     def register_message(self, message: MessageDefinition) -> None:
         """Register a MessageDefinition with consistency in mind."""
-        pass
+        self.message_id_store.add_msgid_and_symbol(message.msgid, message.symbol)
+        self._messages_definitions[message.msgid] = message
+        self._msgs_by_category[message.msgid[0]].append(message.msgid)
+        for old_msgid, old_symbol in message.old_names:
+            self.message_id_store.add_legacy_msgid_and_symbol(old_msgid, old_symbol, message.msgid)
 
     @functools.lru_cache(maxsize=None)
     def get_message_definitions(self, msgid_or_symbol: str) -> list[MessageDefinition]:
@@ -42,20 +47,49 @@ class MessageDefinitionStore:
         about 1000 characters, so even if we would have 1000 messages the cache would only
         take up ~= 1 Mb.
         """
-        pass
+        try:
+            msgids = self.message_id_store.get_active_msgids(msgid_or_symbol)
+        except UnknownMessageError:
+            return []
+        return [self._messages_definitions[msgid] for msgid in msgids]
 
     def get_msg_display_string(self, msgid_or_symbol: str) -> str:
         """Generates a user-consumable representation of a message."""
-        pass
+        message_definitions = self.get_message_definitions(msgid_or_symbol)
+        if not message_definitions:
+            raise UnknownMessageError(f"No such message id or symbol '{msgid_or_symbol}'.")
+        message = message_definitions[0]
+        return f"{message.symbol} ({message.msgid})"
 
     def help_message(self, msgids_or_symbols: Sequence[str]) -> None:
         """Display help messages for the given message identifiers."""
-        pass
+        for msgid_or_symbol in msgids_or_symbols:
+            try:
+                for message in self.get_message_definitions(msgid_or_symbol):
+                    print(message.format_help(checkerref=True))
+                    print("")
+            except UnknownMessageError:
+                print(f"No help message available for '{msgid_or_symbol}'")
 
     def list_messages(self) -> None:
         """Output full messages list documentation in ReST format."""
-        pass
+        by_checker: dict[str, list[MessageDefinition]] = {}
+        for message in self.messages:
+            by_checker.setdefault(message.checker_name, []).append(message)
+
+        for checker, messages in sorted(by_checker.items()):
+            print(f"Messages for checker ``{checker}``:")
+            for message in sorted(messages, key=lambda m: m.msgid):
+                print(f":{message.msgid} ({message.symbol}): {message.msg}")
+            print("")
 
     def find_emittable_messages(self) -> tuple[list[MessageDefinition], list[MessageDefinition]]:
         """Finds all emittable and non-emittable messages."""
-        pass
+        emittable = []
+        non_emittable = []
+        for message in self.messages:
+            if message.may_be_emitted(self.py_version):
+                emittable.append(message)
+            else:
+                non_emittable.append(message)
+        return emittable, non_emittable
