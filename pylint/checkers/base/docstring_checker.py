@@ -17,4 +17,13 @@ class DocStringChecker(_BasicChecker):
 
     def _check_docstring(self, node_type: Literal['class', 'function', 'method', 'module'], node: nodes.Module | nodes.ClassDef | nodes.FunctionDef, report_missing: bool=True, confidence: interfaces.Confidence=interfaces.HIGH) -> None:
         """Check if the node has a non-empty docstring."""
-        pass
+        docstring = node.doc
+        if docstring is None:
+            if report_missing:
+                self.add_message(f'missing-{node_type}-docstring', node=node, confidence=confidence)
+        elif not docstring.strip():
+            self.add_message('empty-docstring', node=node, args=(node_type,), confidence=confidence)
+        
+        if isinstance(node, nodes.FunctionDef) and node.returns and not utils.is_property_setter(node) and not utils.is_overload_stub(node):
+            if node.doc and ':return:' not in node.doc and ':rtype:' not in node.doc:
+                self.add_message('missing-return-doc', node=node, confidence=confidence)
