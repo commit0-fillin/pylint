@@ -13,4 +13,19 @@ class _HelpAction(_AccessParserAction):
 
 def _register_generate_config_options(parser: argparse.ArgumentParser) -> None:
     """Registers the necessary arguments on the parser."""
-    pass
+    parser.add_argument(
+        "-o", "--output-file",
+        help="The path to the output file. If not provided, the configuration will be printed to stdout.",
+        type=str,
+        default=None,
+    )
+    parser.add_argument(
+        "--include-all",
+        help="Include all options in the generated configuration, even those with default values.",
+        action="store_true",
+    )
+    parser.add_argument(
+        "--comment-all",
+        help="Add comments for all options in the generated configuration.",
+        action="store_true",
+    )
