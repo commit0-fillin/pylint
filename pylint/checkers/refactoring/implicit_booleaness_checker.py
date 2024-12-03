@@ -54,15 +54,51 @@ class ImplicitBooleanessChecker(checkers.BaseChecker):
         """`not len(S)` must become `not S` regardless if the parent block is a test
         condition or something else (boolean expression) e.g. `if not len(S):`.
         """
-        pass
+        if (
+            isinstance(node, nodes.UnaryOp)
+            and node.op == 'not'
+            and isinstance(node.operand, nodes.Call)
+            and isinstance(node.operand.func, nodes.Name)
+            and node.operand.func.name == 'len'
+        ):
+            self.add_message(
+                'use-implicit-booleaness-not-len',
+                node=node,
+                confidence=INFERENCE,
+            )
 
     def _check_use_implicit_booleaness_not_comparison(self, node: nodes.Compare) -> None:
         """Check for left side and right side of the node for empty literals."""
-        pass
+        if len(node.ops) != 1:
+            return
+
+        operator, right = node.ops[0]
+        if operator not in self._operators:
+            return
+
+        left = node.left
+        if (isinstance(left, (nodes.List, nodes.Tuple, nodes.Dict)) and not left.elts) or (
+            isinstance(left, nodes.Const) and left.value in ('', b'')
+        ):
+            if operator in ('!=', 'is not'):
+                message, suggestion = self._implicit_booleaness_message_args(left, operator, right)
+                self.add_message('use-implicit-booleaness-not-comparison', node=node, args=(message, suggestion, type(left).__name__.lower()), confidence=HIGH)
+        elif (isinstance(right, (nodes.List, nodes.Tuple, nodes.Dict)) and not right.elts) or (
+            isinstance(right, nodes.Const) and right.value in ('', b'')
+        ):
+            if operator in ('==', 'is'):
+                message, suggestion = self._implicit_booleaness_message_args(right, operator, left)
+                self.add_message('use-implicit-booleaness-not-comparison', node=node, args=(message, suggestion, type(right).__name__.lower()), confidence=HIGH)
 
     def _implicit_booleaness_message_args(self, literal_node: nodes.NodeNG, operator: str, target_node: nodes.NodeNG) -> tuple[str, str, str]:
         """Helper to get the right message for "use-implicit-booleaness-not-comparison"."""
-        pass
+        if isinstance(literal_node, nodes.Const) and literal_node.value in ('', b''):
+            original = f"{target_node.as_string()} {operator} ''"
+            suggestion = f"not {target_node.as_string()}" if operator in ('==', 'is') else target_node.as_string()
+        else:
+            original = f"{target_node.as_string()} {operator} {literal_node.as_string()}"
+            suggestion = f"not {target_node.as_string()}" if operator in ('==', 'is') else target_node.as_string()
+        return original, suggestion
 
     @staticmethod
     def base_names_of_instance(node: util.UninferableBase | bases.Instance) -> list[str]:
@@ -71,4 +107,16 @@ class ImplicitBooleanessChecker(checkers.BaseChecker):
 
         The inherited names include 'object'.
         """
-        pass
+        if isinstance(node, util.UninferableBase):
+            return []
+        
+        try:
+            class_node = node._proxied
+        except AttributeError:
+            return []
+
+        base_names = [base.name for base in class_node.bases if base.name is not None]
+        if 'object' not in base_names:
+            base_names.append('object')
+        
+        return base_names
