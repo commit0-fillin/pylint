@@ -30,31 +30,38 @@ class MultiReporter:
         This method is only provided for API parity with BaseReporter
         and should not be called with non-None values for 'output'.
         """
-        pass
+        if output is not None:
+            raise ValueError("MultiReporter doesn't support setting output")
 
     def __del__(self) -> None:
         self.close_output_files()
 
     def handle_message(self, msg: Message) -> None:
         """Handle a new message triggered on the current file."""
-        pass
+        for reporter in self._sub_reporters:
+            reporter.handle_message(msg)
 
     def writeln(self, string: str='') -> None:
         """Write a line in the output buffer."""
-        pass
+        for reporter in self._sub_reporters:
+            reporter.writeln(string)
 
     def display_reports(self, layout: Section) -> None:
         """Display results encapsulated in the layout tree."""
-        pass
+        for reporter in self._sub_reporters:
+            reporter.display_reports(layout)
 
     def display_messages(self, layout: Section | None) -> None:
         """Hook for displaying the messages of the reporter."""
-        pass
+        for reporter in self._sub_reporters:
+            reporter.display_messages(layout)
 
     def on_set_current_module(self, module: str, filepath: str | None) -> None:
         """Hook called when a module starts to be analysed."""
-        pass
+        for reporter in self._sub_reporters:
+            reporter.on_set_current_module(module, filepath)
 
     def on_close(self, stats: LinterStats, previous_stats: LinterStats | None) -> None:
         """Hook called when a module finished analyzing."""
-        pass
+        for reporter in self._sub_reporters:
+            reporter.on_close(stats, previous_stats)
