@@ -2,6 +2,7 @@
 from __future__ import annotations
 from collections.abc import Iterator
 from typing import Any
+import warnings
 from pylint.config.arguments_manager import _ArgumentsManager
 from pylint.typing import OptionDict, Options
 
@@ -21,15 +22,31 @@ class _ArgumentsProvider:
 
     def _option_value(self, opt: str) -> Any:
         """Get the current value for the given option."""
-        pass
+        return getattr(self._arguments_manager.config, opt, None)
 
     def _options_by_section(self) -> Iterator[tuple[str, list[tuple[str, OptionDict, Any]]] | tuple[None, dict[str, list[tuple[str, OptionDict, Any]]]]]:
         """Return an iterator on options grouped by section.
 
         (section, [list of (optname, optdict, optvalue)])
         """
-        pass
+        sections: dict[str, list[tuple[str, OptionDict, Any]]] = {}
+        for optname, optdict in self._arguments_manager._option_dicts.items():
+            sections.setdefault(optdict.get('group', ''), []).append(
+                (optname, optdict, self._option_value(optname))
+            )
+        
+        if len(sections) == 1:
+            # If there's only one section, return it directly
+            return next(iter(sections.items()))
+        
+        # If there are multiple sections, return them as a dict
+        return (None, sections)
 
     def _options_and_values(self, options: Options | None=None) -> Iterator[tuple[str, OptionDict, Any]]:
         """DEPRECATED."""
-        pass
+        warnings.warn("The _options_and_values method is deprecated.", DeprecationWarning, stacklevel=2)
+        if options is None:
+            options = self.options
+        for section, option_list in options:
+            for option in option_list:
+                yield (option['name'], option, self._option_value(option['name']))
