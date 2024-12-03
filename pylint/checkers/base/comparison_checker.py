@@ -11,7 +11,11 @@ TYPE_QNAME = 'builtins.type'
 
 def _is_one_arg_pos_call(call: nodes.NodeNG) -> bool:
     """Is this a call with exactly 1 positional argument ?"""
-    pass
+    return (
+        isinstance(call, nodes.Call)
+        and len(call.args) == 1
+        and not call.keywords
+    )
 
 class ComparisonChecker(_BasicChecker):
     """Checks for comparisons.
@@ -25,11 +29,43 @@ class ComparisonChecker(_BasicChecker):
 
     def _check_singleton_comparison(self, left_value: nodes.NodeNG, right_value: nodes.NodeNG, root_node: nodes.Compare, checking_for_absence: bool=False) -> None:
         """Check if == or != is being used to compare a singleton value."""
-        pass
+        singleton = None
+        other_value = None
+
+        if isinstance(left_value, nodes.Const) and left_value.value in SINGLETON_VALUES:
+            singleton = left_value.value
+            other_value = right_value
+        elif isinstance(right_value, nodes.Const) and right_value.value in SINGLETON_VALUES:
+            singleton = right_value.value
+            other_value = left_value
+
+        if singleton is not None:
+            if checking_for_absence:
+                suggestion = "is not" if singleton is not None else "is"
+                self.add_message(
+                    "singleton-comparison",
+                    node=root_node,
+                    args=(root_node.as_string(), f"{other_value.as_string()} {suggestion} {singleton}"),
+                )
+            else:
+                suggestion = "is" if singleton is not None else "is not"
+                self.add_message(
+                    "singleton-comparison",
+                    node=root_node,
+                    args=(root_node.as_string(), f"{other_value.as_string()} {suggestion} {singleton}"),
+                )
 
     def _check_literal_comparison(self, literal: nodes.NodeNG, node: nodes.Compare) -> None:
         """Check if we compare to a literal, which is usually what we do not want to do."""
-        pass
+        if isinstance(literal, nodes.Const):
+            if isinstance(literal.value, (int, float, complex)):
+                message = f"Consider using {node.ops[0][0]} for equality comparison with literal."
+                suggestion = f"{node.left.as_string()} {node.ops[0][0]} {literal.value}"
+                self.add_message(
+                    "literal-comparison",
+                    node=node,
+                    args=(node.as_string(), suggestion, node.ops[0][1], message),
+                )
 
     def _check_logical_tautology(self, node: nodes.Compare) -> None:
         """Check if identifier is compared against itself.
@@ -40,12 +76,44 @@ class ComparisonChecker(_BasicChecker):
         if val == val:  # [comparison-with-itself]
             pass
         """
-        pass
+        left = node.left
+        right = node.ops[0][1]
+
+        if (isinstance(left, nodes.Name) and isinstance(right, nodes.Name) and
+            left.name == right.name):
+            self.add_message(
+                "comparison-with-itself",
+                node=node,
+                args=(node.as_string(),),
+            )
 
     def _check_constants_comparison(self, node: nodes.Compare) -> None:
         """When two constants are being compared it is always a logical tautology."""
-        pass
+        left = node.left
+        right = node.ops[0][1]
+
+        if isinstance(left, nodes.Const) and isinstance(right, nodes.Const):
+            operator = node.ops[0][0]
+            left_value = left.value
+            right_value = right.value
+
+            result = eval(f"{left_value} {operator} {right_value}")
+            self.add_message(
+                "comparison-of-constants",
+                node=node,
+                args=(f"{left_value} {operator} {right_value}", str(result)),
+            )
 
     def _check_type_x_is_y(self, node: nodes.Compare, left: nodes.NodeNG, operator: str, right: nodes.NodeNG) -> None:
         """Check for expressions like type(x) == Y."""
-        pass
+        if (isinstance(left, nodes.Call) and
+            isinstance(left.func, nodes.Name) and
+            left.func.name == 'type' and
+            operator in TYPECHECK_COMPARISON_OPERATORS):
+
+            if _is_one_arg_pos_call(left):
+                self.add_message(
+                    "unidiomatic-typecheck",
+                    node=node,
+                    confidence=INFERENCE,
+                )
