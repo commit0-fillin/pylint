@@ -6,7 +6,7 @@ from typing import TypedDict
 
 def parse_python_version(ver_str: str) -> tuple[int, ...]:
     """Convert python version to a tuple of integers for easy comparison."""
-    pass
+    return tuple(map(int, ver_str.split('.')))
 
 class NoFileError(Exception):
     pass
