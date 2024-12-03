@@ -37,19 +37,26 @@ class BaseLayout(VNode):
 
     def append(self, child: VNode) -> None:
         """Add a node to children."""
-        pass
+        self.children.append(child)
+        child.parent = self
 
     def insert(self, index: int, child: VNode) -> None:
         """Insert a child node."""
-        pass
+        self.children.insert(index, child)
+        child.parent = self
 
     def parents(self) -> list[BaseLayout]:
         """Return the ancestor nodes."""
-        pass
+        ancestors = []
+        parent = self.parent
+        while parent:
+            ancestors.append(parent)
+            parent = parent.parent
+        return ancestors
 
     def add_text(self, text: str) -> None:
         """Shortcut to add text data."""
-        pass
+        self.append(Text(text))
 
 class Text(VNode):
     """A text portion.
