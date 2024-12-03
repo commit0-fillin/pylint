@@ -33,7 +33,14 @@ class CodeStyleChecker(BaseChecker):
 
     def _check_dict_consider_namedtuple_dataclass(self, node: nodes.Dict) -> None:
         """Check if dictionary values can be replaced by Namedtuple or Dataclass."""
-        pass
+        if len(node.items) < 2:
+            return
+
+        all_keys_const = all(isinstance(key, nodes.Const) for key, _ in node.items)
+        all_values_same_type = len(set(type(value) for _, value in node.items)) == 1
+
+        if all_keys_const and all_values_same_type:
+            self.add_message("consider-using-namedtuple-or-dataclass", node=node)
 
     def _check_consider_using_assignment_expr(self, node: nodes.If) -> None:
         """Check if an assignment expression (walrus operator) can be used.
@@ -49,7 +56,38 @@ class CodeStyleChecker(BaseChecker):
 
         Note: Assignment expressions were added in Python 3.8
         """
-        pass
+        if not self.linter.is_message_enabled("consider-using-assignment-expr"):
+            return
+
+        prev_sibling = node.previous_sibling()
+        if not isinstance(prev_sibling, (nodes.Assign, nodes.AnnAssign)):
+            return
+
+        assign_names = list(prev_sibling.get_children())
+        if len(assign_names) != 2:
+            return
+
+        name = assign_names[0]
+        if not isinstance(name, nodes.AssignName):
+            return
+
+        if not self._check_prev_sibling_to_if_stmt(prev_sibling, name.name):
+            return
+
+        if self._check_ignore_assignment_expr_suggestion(node, name.name):
+            return
+
+        if isinstance(node.test, nodes.Compare):
+            suggestion = f"if ({name.name} := {prev_sibling.value.as_string()}) {node.test.as_string()[len(name.name):]}"
+        else:
+            suggestion = f"if ({name.name} := {prev_sibling.value.as_string()})"
+
+        self.add_message(
+            "consider-using-assignment-expr",
+            node=node,
+            args=(suggestion,),
+            confidence=INFERENCE,
+        )
 
     @staticmethod
     def _check_prev_sibling_to_if_stmt(prev_sibling: nodes.NodeNG | None, name: str | None) -> TypeGuard[nodes.Assign | nodes.AnnAssign]:
@@ -57,7 +95,12 @@ class CodeStyleChecker(BaseChecker):
 
         Ignore statements which span multiple lines.
         """
-        pass
+        return (
+            isinstance(prev_sibling, (nodes.Assign, nodes.AnnAssign))
+            and prev_sibling.lineno == prev_sibling.end_lineno
+            and isinstance(prev_sibling.targets[0], nodes.AssignName)
+            and prev_sibling.targets[0].name == name
+        )
 
     @staticmethod
     def _check_ignore_assignment_expr_suggestion(node: nodes.If, name: str | None) -> bool:
@@ -66,4 +109,13 @@ class CodeStyleChecker(BaseChecker):
         E.g., in cases where a match statement would be a better fit
         (multiple conditions).
         """
-        pass
+        if isinstance(node.test, nodes.Compare):
+            return len(node.test.ops) > 1 or any(
+                isinstance(op, (nodes.In, nodes.NotIn)) for op, _ in node.test.ops
+            )
+        if isinstance(node.test, nodes.BoolOp):
+            return any(
+                isinstance(operand, nodes.Name) and operand.name == name
+                for operand in node.test.values
+            )
+        return False
