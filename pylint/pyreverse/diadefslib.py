@@ -23,23 +23,30 @@ class DiaDefGenerator:
 
     def get_title(self, node: nodes.ClassDef) -> str:
         """Get title for objects."""
-        pass
+        return node.name if self.module_names else node.qname()
 
     def _set_option(self, option: bool | None) -> bool:
         """Activate some options if not explicitly deactivated."""
-        pass
+        return option if option is not None else self.config.all_ancestors
 
     def _set_default_options(self) -> None:
         """Set different default options with _default dictionary."""
-        pass
+        self.show_ancestors = self._set_option(self.config.show_ancestors)
+        self.all_ancestors = self._set_option(self.config.all_ancestors)
+        self.show_associated = self._set_option(self.config.show_associated)
+        self.show_builtin = self._set_option(self.config.show_builtin)
+        self.module_names = False
 
     def _get_levels(self) -> tuple[int, int]:
         """Help function for search levels."""
-        pass
+        return (self.config.max_inference_depth, self.config.max_inference_depth)
 
     def show_node(self, node: nodes.ClassDef) -> bool:
         """Determine if node should be shown based on config."""
-        pass
+        if isinstance(node, nodes.ClassDef):
+            if self.show_builtin or not node.root().name.startswith('builtins'):
+                return self.classdiagram.show_attr(node)
+        return False
 
     def add_class(self, node: nodes.ClassDef) -> None:
         """Visit one class and add it to diagram."""
