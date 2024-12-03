@@ -29,7 +29,13 @@ def get_access_path(key: str | Literal[0], parts: list[tuple[bool, str]]) -> str
     """Given a list of format specifiers, returns
     the final access path (e.g. a.b.c[0][1]).
     """
-    pass
+    path = str(key)
+    for is_attribute, part in parts:
+        if is_attribute:
+            path += f".{part}"
+        else:
+            path += f"[{part}]"
+    return path
 
 class StringFormatChecker(BaseChecker):
     """Checks string formatting operations to ensure that the format string
@@ -40,13 +46,78 @@ class StringFormatChecker(BaseChecker):
 
     def _check_new_format(self, node: nodes.Call, func: bases.BoundMethod) -> None:
         """Check the new string formatting."""
-        pass
+        if isinstance(node.func, nodes.Attribute):
+            format_string = next(func.infer()).value
+        else:
+            format_string = func.format_string
+
+        try:
+            fields, num_args, manual_pos_args = parse_format_method_string(format_string)
+        except IncompleteFormatString:
+            self.add_message('bad-format-string', node=node)
+            return
+
+        named_fields = [field[0] for field in fields if isinstance(field[0], str)]
+        if num_args and manual_pos_args:
+            self.add_message('format-combined-specification', node=node)
+
+        args = node.args
+        kwargs = []
+        for keyword in node.keywords or []:
+            if keyword.arg is None:
+                args.extend(keyword.value.elts)
+            else:
+                kwargs.append(keyword)
+
+        if not num_args and not named_fields:
+            if args or kwargs:
+                self.add_message('too-many-format-args', node=node)
+            return
+
+        check_args = num_args - manual_pos_args
+        if len(args) > check_args:
+            self.add_message('too-many-format-args', node=node)
+        elif len(args) < check_args:
+            self.add_message('too-few-format-args', node=node)
+
+        for field, arg in zip(fields, args):
+            if isinstance(field[0], int):
+                self._check_new_format_specifiers(node, [field], {field[0]: arg})
+
+        for keyword in kwargs:
+            if keyword.arg in named_fields:
+                self._check_new_format_specifiers(node, [f for f in fields if f[0] == keyword.arg], {keyword.arg: keyword.value})
+            else:
+                self.add_message('unused-format-string-argument', node=node, args=(keyword.arg,))
+
+        for field in fields:
+            if isinstance(field[0], str) and field[0] not in [kw.arg for kw in kwargs]:
+                self.add_message('missing-format-argument-key', node=node, args=(field[0],))
 
     def _check_new_format_specifiers(self, node: nodes.Call, fields: list[tuple[str, list[tuple[bool, str]]]], named: dict[str, SuccessfulInferenceResult]) -> None:
         """Check attribute and index access in the format
         string ("{0.a}" and "{0[a]}").
         """
-        pass
+        for key, specifiers in fields:
+            if not specifiers:
+                continue
+
+            if key in named:
+                value = named[key]
+                for is_attribute, specifier in specifiers:
+                    if is_attribute:
+                        if not hasattr(value, specifier):
+                            self.add_message('missing-format-attribute', node=node, args=(specifier, get_access_path(key, specifiers)))
+                        else:
+                            value = getattr(value, specifier)
+                    else:
+                        if not hasattr(value, '__getitem__'):
+                            self.add_message('invalid-format-index', node=node, args=(specifier, get_access_path(key, specifiers)))
+                        else:
+                            try:
+                                value = value[specifier]
+                            except (KeyError, IndexError):
+                                self.add_message('invalid-format-index', node=node, args=(specifier, get_access_path(key, specifiers)))
 
 class StringConstantChecker(BaseTokenChecker, BaseRawFileChecker):
     """Check string literals."""
@@ -72,7 +143,15 @@ class StringConstantChecker(BaseTokenChecker, BaseRawFileChecker):
         Args:
           tokens: The tokens to be checked against for consistent usage.
         """
-        pass
+        string_tokens = [t for t in tokens if t.type == tokenize.STRING]
+        if not string_tokens:
+            return
+
+        preferred_delimiter = _get_quote_delimiter(string_tokens[0].string)
+        for token in string_tokens:
+            delimiter = _get_quote_delimiter(token.string)
+            if delimiter != preferred_delimiter and _is_quote_delimiter_chosen_freely(token.string):
+                self.add_message('inconsistent-quotes', line=token.start[0], args=(delimiter,))
 
     def process_non_raw_string_token(self, prefix: str, string_body: str, start_row: int, string_start_col: int) -> None:
         """Check for bad escapes in a non-raw string.
@@ -83,11 +162,25 @@ class StringConstantChecker(BaseTokenChecker, BaseRawFileChecker):
         start_row: line number in the source.
         string_start_col: col number of the string start in the source.
         """
-        pass
+        for match in re.finditer(r'[^\\]\\(?P<char>[^\\])', string_body):
+            char = match.group('char')
+            if char not in self.ESCAPE_CHARACTERS:
+                col_offset = string_start_col + match.start() + 1
+                self.add_message('anomalous-backslash-in-string', line=start_row, col_offset=col_offset, args=(char,))
+
+        if 'u' in prefix:
+            for match in re.finditer(r'[^\\]\\(?P<char>[^uUN\\])', string_body):
+                char = match.group('char')
+                if char not in self.UNICODE_ESCAPE_CHARACTERS:
+                    col_offset = string_start_col + match.start() + 1
+                    self.add_message('anomalous-unicode-escape-in-string', line=start_row, col_offset=col_offset, args=(char,))
 
     def _detect_u_string_prefix(self, node: nodes.Const) -> None:
         """Check whether strings include a 'u' prefix like u'String'."""
-        pass
+        if isinstance(node.value, str) and node.raw_string:
+            prefix = node.raw_string.split("'")[0].lower()
+            if 'u' in prefix:
+                self.add_message('redundant-u-string-prefix', node=node)
 
 def str_eval(token: str) -> str:
     """Mostly replicate `ast.literal_eval(token)` manually to avoid any performance hit.
@@ -96,7 +189,32 @@ def str_eval(token: str) -> str:
     We have to support all string literal notations:
     https://docs.python.org/3/reference/lexical_analysis.html#string-and-bytes-literals
     """
-    pass
+    prefix = ''
+    quote = ''
+    for i, char in enumerate(token):
+        if char in "'\"":
+            quote = char
+            token = token[i:]
+            break
+        prefix += char.lower()
+
+    if 'f' in prefix:
+        return token  # Don't evaluate f-strings
+
+    if quote * 3 == token[:3]:
+        end = token.rindex(quote * 3)
+        token = token[3:end]
+    else:
+        end = token.rindex(quote)
+        token = token[1:end]
+
+    if 'r' in prefix:
+        return token  # Don't evaluate raw strings
+
+    try:
+        return token.encode('ascii').decode('unicode-escape')
+    except UnicodeDecodeError:
+        return token
 
 def _is_long_string(string_token: str) -> bool:
     """Is this string token a "longstring" (is it triple-quoted)?
@@ -115,7 +233,7 @@ def _is_long_string(string_token: str) -> bool:
         A boolean representing whether this token matches a longstring
         regex.
     """
-    pass
+    return bool(SINGLE_QUOTED_REGEX.match(string_token) or DOUBLE_QUOTED_REGEX.match(string_token))
 
 def _get_quote_delimiter(string_token: str) -> str:
     """Returns the quote character used to delimit this token string.
@@ -132,7 +250,10 @@ def _get_quote_delimiter(string_token: str) -> str:
     Raises:
       ValueError: No quote delimiter characters are present.
     """
-    pass
+    match = QUOTE_DELIMITER_REGEX.match(string_token)
+    if not match:
+        raise ValueError("String token is not a well-formed string.")
+    return match.group(2)
 
 def _is_quote_delimiter_chosen_freely(string_token: str) -> bool:
     """Was there a non-awkward option for the quote delimiter?
@@ -146,4 +267,13 @@ def _is_quote_delimiter_chosen_freely(string_token: str) -> bool:
         strings are excepted from this analysis under the assumption that their
         quote characters are set by policy.
     """
-    pass
+    if _is_long_string(string_token):
+        return False
+
+    delimiter = _get_quote_delimiter(string_token)
+    other_delimiter = '"' if delimiter == "'" else "'"
+
+    string_body = string_token[1:-1]  # Remove the quotes
+    return other_delimiter not in string_body or (
+        other_delimiter in string_body and delimiter in string_body
+    )
