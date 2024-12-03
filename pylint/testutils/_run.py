@@ -6,11 +6,13 @@ from __future__ import annotations
 from collections.abc import Sequence
 from pylint.lint import Run as LintRun
 from pylint.reporters.base_reporter import BaseReporter
-from pylint.testutils.lint_module_test import PYLINTRC
+from pylint.testutils.lint_module_test import PYLINTRC, Path
 
 def _add_rcfile_default_pylintrc(args: list[str]) -> list[str]:
     """Add a default pylintrc with the rcfile option in a list of pylint args."""
-    pass
+    if not any(arg.startswith('--rcfile=') for arg in args):
+        args.append(f'--rcfile={PYLINTRC}')
+    return args
 
 class _Run(LintRun):
     """Like Run, but we're using an explicitly set empty pylintrc.
