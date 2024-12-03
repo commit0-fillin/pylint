@@ -17,4 +17,15 @@ class DunderChecker(BaseChecker):
         """Check if known dunder method is misspelled or dunder name is not one
         of the pre-defined names.
         """
-        pass
+        name = node.name
+        if name.startswith('__') and name.endswith('__'):
+            if len(name) > 4:  # Ignore names like '__'
+                valid_dunder_names = set()
+                for methods in DUNDER_METHODS.values():
+                    valid_dunder_names.update(methods.keys())
+                valid_dunder_names.update(DUNDER_PROPERTIES)
+                valid_dunder_names.update(EXTRA_DUNDER_METHODS)
+                valid_dunder_names.update(self.linter.config.good_dunder_names)
+
+                if name not in valid_dunder_names:
+                    self.add_message('bad-dunder-name', node=node, args=(name,))
