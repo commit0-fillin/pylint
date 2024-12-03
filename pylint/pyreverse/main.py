@@ -39,6 +39,28 @@ class Run(_ArgumentsManager, _ArgumentsProvider):
 
     def run(self, args: list[str]) -> int:
         """Checking arguments and run project."""
-        pass
+        if not args:
+            print("No files or modules to analyze. Please provide at least one.")
+            return 1
+
+        try:
+            project = project_from_files(
+                args,
+                project_name=self.config.project,
+                black_list=self.config.ignore_list,
+                verbose=self.config.verbose
+            )
+            linker = Linker(project)
+            handler = DiadefsHandler(self.config)
+            diadefs = handler.get_diadefs(project, linker)
+            writer = DiagramWriter(self.config)
+            writer.write(diadefs)
+        except Exception as ex:
+            print(f"An error occurred: {ex}", file=sys.stderr)
+            if self.config.verbose:
+                traceback.print_exc()
+            return 1
+
+        return 0
 if __name__ == '__main__':
     Run(sys.argv[1:])
