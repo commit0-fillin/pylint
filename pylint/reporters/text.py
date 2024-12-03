@@ -31,7 +31,15 @@ class MessageStyle(NamedTuple):
 
         :return: the built escape code
         """
-        pass
+        code = []
+        if self.color:
+            if isinstance(self.color, str):
+                code.append(ANSI_COLORS[self.color])
+            else:
+                code.append(f'38;5;{self.color}')
+        for style in self.style:
+            code.append(ANSI_STYLES[style])
+        return ANSI_PREFIX + ';'.join(code) + ANSI_END
 ColorMappingDict = Dict[str, MessageStyle]
 TITLE_UNDERLINES = ['', '=', '-', '.']
 ANSI_PREFIX = '\x1b['
@@ -44,7 +52,10 @@ MESSAGE_FIELDS = {i.name for i in fields(Message)}
 
 def colorize_ansi(msg: str, msg_style: MessageStyle) -> str:
     """Colorize message by wrapping it with ANSI escape codes."""
-    pass
+    if not msg_style.color and not msg_style.style:
+        return msg
+    escape_code = msg_style.__get_ansi_code()
+    return f"{escape_code}{msg}{ANSI_RESET}"
 
 class TextReporter(BaseReporter):
     """Reports messages and layouts in plain text."""
@@ -61,21 +72,37 @@ class TextReporter(BaseReporter):
 
     def on_set_current_module(self, module: str, filepath: str | None) -> None:
         """Set the format template to be used and check for unrecognized arguments."""
-        pass
+        self._modules.add(module)
+        self._template = self.line_format
+        # Remove any unrecognized arguments from the template
+        recognized_args = MESSAGE_FIELDS | {'path', 'module', 'obj', 'column'}
+        self._fixed_template = re.sub(
+            r'\{([^}]+)\}',
+            lambda m: m.group(0) if m.group(1) in recognized_args else '',
+            self._template
+        )
 
     def write_message(self, msg: Message) -> None:
         """Convenience method to write a formatted message with class default
         template.
         """
-        pass
+        self.writeln(self._fixed_template.format(**{**asdict(msg), 'path': msg.abspath, 'module': msg.module, 'obj': msg.obj, 'column': msg.column or 0}))
 
     def handle_message(self, msg: Message) -> None:
         """Manage message of different type and in the context of path."""
-        pass
+        if msg.module not in self._modules:
+            if msg.module and msg.module != 'global':
+                self.writeln(f'************* Module {msg.module}')
+                self._modules.add(msg.module)
+            else:
+                self.writeln('************* ')
+        self.write_message(msg)
 
     def _display(self, layout: Section) -> None:
         """Launch layouts display."""
-        pass
+        writer = TextWriter()
+        writer.format_children(layout)
+        self.writeln(writer.stream.getvalue())
 
 class NoHeaderReporter(TextReporter):
     """Reports messages and layouts in plain text without a module header."""
@@ -83,7 +110,7 @@ class NoHeaderReporter(TextReporter):
 
     def handle_message(self, msg: Message) -> None:
         """Write message(s) without module header."""
-        pass
+        self.write_message(msg)
 
 class ParseableTextReporter(TextReporter):
     """A reporter very similar to TextReporter, but display messages in a form
@@ -119,13 +146,19 @@ class ColorizedTextReporter(TextReporter):
 
     def _get_decoration(self, msg_id: str) -> MessageStyle:
         """Returns the message style as defined in self.color_mapping."""
-        pass
+        return self.color_mapping.get(msg_id[0], MessageStyle(None))
 
     def handle_message(self, msg: Message) -> None:
         """Manage message of different types, and colorize output
         using ANSI escape codes.
         """
-        pass
+        if msg.module not in self._modules:
+            if msg.module and msg.module != 'global':
+                self.writeln(colorize_ansi(f'************* Module {msg.module}', MessageStyle('green', ('bold',))))
+                self._modules.add(msg.module)
+            else:
+                self.writeln(colorize_ansi('************* ', MessageStyle('green', ('bold',))))
+        self.write_message(colorize_ansi(self._fixed_template.format(**{**asdict(msg), 'path': msg.abspath, 'module': msg.module, 'obj': msg.obj, 'column': msg.column or 0}), self._get_decoration(msg.C)))
 
 class GithubReporter(TextReporter):
     """Report messages in GitHub's special format to annotate code in its user
