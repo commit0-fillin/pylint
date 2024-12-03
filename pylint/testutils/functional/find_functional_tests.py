@@ -12,11 +12,42 @@ IGNORED_PARENT_PARENT_DIRS = {'docparams', 'deprecated_relative_import', 'ext'}
 
 def get_functional_test_files_from_directory(input_dir: Path | str, max_file_per_directory: int=REASONABLY_DISPLAYABLE_VERTICALLY) -> list[FunctionalTestFile]:
     """Get all functional tests in the input_dir."""
-    pass
+    input_dir = Path(input_dir)
+    _check_functional_tests_structure(input_dir, max_file_per_directory)
+    
+    functional_tests = []
+    for root, _, files in os.walk(input_dir):
+        root_path = Path(root)
+        if root_path.name.startswith('_') or root_path.name in IGNORED_PARENT_DIRS or root_path.parent.name in IGNORED_PARENT_PARENT_DIRS:
+            continue
+        
+        python_files = [f for f in files if f.endswith('.py') and not f.startswith('_')]
+        for file in python_files:
+            functional_tests.append(FunctionalTestFile(str(root_path), file))
+    
+    return functional_tests
 
 def _check_functional_tests_structure(directory: Path, max_file_per_directory: int) -> None:
     """Check if test directories follow correct file/folder structure.
 
     Ignore underscored directories or files.
     """
-    pass
+    for root, dirs, files in os.walk(directory):
+        root_path = Path(root)
+        if root_path.name.startswith('_'):
+            continue
+        
+        python_files = [f for f in files if f.endswith('.py') and not f.startswith('_')]
+        if len(python_files) > max_file_per_directory:
+            raise ValueError(f"Directory {root} contains {len(python_files)} Python files, "
+                             f"which exceeds the maximum of {max_file_per_directory}.")
+        
+        for file in python_files:
+            file_path = root_path / file
+            try:
+                FunctionalTestFile(str(root_path), file)
+            except NoFileError:
+                raise ValueError(f"File {file_path} is not a valid functional test file.")
+        
+        # Remove directories starting with underscore from further processing
+        dirs[:] = [d for d in dirs if not d.startswith('_')]
