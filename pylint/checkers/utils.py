@@ -54,21 +54,36 @@ class InferredTypeError(Exception):
 
 def get_all_elements(node: nodes.NodeNG) -> Iterable[nodes.NodeNG]:
     """Recursively returns all atoms in nested lists and tuples."""
-    pass
+    if isinstance(node, (nodes.List, nodes.Tuple)):
+        for child in node.elts:
+            yield from get_all_elements(child)
+    else:
+        yield node
 
 def is_super(node: nodes.NodeNG) -> bool:
     """Return True if the node is referencing the "super" builtin function."""
-    pass
+    return (
+        isinstance(node, nodes.Name)
+        and node.name == 'super'
+        and node.root().name == 'builtins'
+    )
 
 def is_error(node: nodes.FunctionDef) -> bool:
     """Return true if the given function node only raises an exception."""
-    pass
+    return (
+        len(node.body) == 1
+        and isinstance(node.body[0], nodes.Raise)
+    )
 builtins = builtins.__dict__.copy()
 SPECIAL_BUILTINS = ('__builtins__',)
 
 def is_builtin_object(node: nodes.NodeNG) -> bool:
     """Returns True if the given node is an object from the __builtin__ module."""
-    pass
+    return (
+        isinstance(node, nodes.Name)
+        and node.name in builtins
+        and node.root().name == 'builtins'
+    )
 
 def is_builtin(name: str) -> bool:
     """Return true if <name> could be considered as a builtin defined by python."""
