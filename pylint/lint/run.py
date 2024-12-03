@@ -31,13 +31,42 @@ def _query_cpu() -> int | None:
     This is based on discussion and copied from suggestions in
     https://bugs.python.org/issue36054.
     """
-    pass
+    try:
+        with open('/sys/fs/cgroup/cpu/cpu.cfs_quota_us') as quota_file:
+            quota = int(quota_file.read())
+        with open('/sys/fs/cgroup/cpu/cpu.cfs_period_us') as period_file:
+            period = int(period_file.read())
+        if quota > 0 and period > 0:
+            return max(1, quota // period)
+    except (FileNotFoundError, ValueError, ZeroDivisionError):
+        pass
+    return None
 
 def _cpu_count() -> int:
     """Use sched_affinity if available for virtualized or containerized
     environments.
     """
-    pass
+    try:
+        import psutil
+        return len(psutil.Process().cpu_affinity())
+    except (ImportError, AttributeError):
+        pass
+
+    try:
+        import os
+        return len(os.sched_getaffinity(0))
+    except AttributeError:
+        pass
+
+    docker_cpu = _query_cpu()
+    if docker_cpu is not None:
+        return docker_cpu
+
+    try:
+        import multiprocessing
+        return multiprocessing.cpu_count()
+    except (ImportError, NotImplementedError):
+        return 1
 
 class Run:
     """Helper class to use as main for pylint with 'run(*sys.argv[1:])'."""
