@@ -22,11 +22,12 @@ class IdGeneratorMixIn:
 
     def init_counter(self, start_value: int=0) -> None:
         """Init the id counter."""
-        pass
+        self.id_count = start_value
 
     def generate_id(self) -> int:
         """Generate a new identifier."""
-        pass
+        self.id_count += 1
+        return self.id_count
 
 class Project:
     """A project handle a set of modules / packages."""
@@ -85,7 +86,8 @@ class Linker(IdGeneratorMixIn, utils.LocalsVisitor):
 
         * optionally tag the node with a unique id
         """
-        pass
+        if self.tag:
+            node.uid = self.generate_id()
 
     def visit_module(self, node: nodes.Module) -> None:
         """Visit an astroid.Module node.
@@ -94,7 +96,10 @@ class Linker(IdGeneratorMixIn, utils.LocalsVisitor):
         * set the depends mapping
         * optionally tag the node with a unique id
         """
-        pass
+        node.locals_type = {}
+        node.depends = []
+        if self.tag:
+            node.uid = self.generate_id()
 
     def visit_classdef(self, node: nodes.ClassDef) -> None:
         """Visit an astroid.Class node.
@@ -102,7 +107,10 @@ class Linker(IdGeneratorMixIn, utils.LocalsVisitor):
         * set the locals_type and instance_attrs_type mappings
         * optionally tag the node with a unique id
         """
-        pass
+        node.locals_type = {}
+        node.instance_attrs_type = {}
+        if self.tag:
+            node.uid = self.generate_id()
 
     def visit_functiondef(self, node: nodes.FunctionDef) -> None:
         """Visit an astroid.Function node.
@@ -110,14 +118,19 @@ class Linker(IdGeneratorMixIn, utils.LocalsVisitor):
         * set the locals_type mapping
         * optionally tag the node with a unique id
         """
-        pass
+        node.locals_type = {}
+        if self.tag:
+            node.uid = self.generate_id()
 
     def visit_assignname(self, node: nodes.AssignName) -> None:
         """Visit an astroid.AssignName node.
 
         handle locals_type
         """
-        pass
+        frame = node.frame()
+        node_type = set(utils.infer_node(node))
+        if node_type:
+            frame.locals_type[node.name] = node_type
 
     @staticmethod
     def handle_assignattr_type(node: nodes.AssignAttr, parent: nodes.ClassDef) -> None:
@@ -125,29 +138,51 @@ class Linker(IdGeneratorMixIn, utils.LocalsVisitor):
 
         handle instance_attrs_type
         """
-        pass
+        node_type = set(utils.infer_node(node))
+        if node_type:
+            parent.instance_attrs_type[node.attrname] = node_type
 
     def visit_import(self, node: nodes.Import) -> None:
         """Visit an astroid.Import node.
 
         resolve module dependencies
         """
-        pass
+        context_file = node.root().file
+        for name in node.names:
+            relative = self.compute_module(name[0], context_file)
+            if relative:
+                self._imported_module(node, relative, relative != name[0])
 
     def visit_importfrom(self, node: nodes.ImportFrom) -> None:
         """Visit an astroid.ImportFrom node.
 
         resolve module dependencies
         """
-        pass
+        basename = node.modname
+        context_file = node.root().file
+        if context_file is not None:
+            relative = self.compute_module(basename, context_file)
+            if relative:
+                self._imported_module(node, relative, relative != basename)
 
     def compute_module(self, context_name: str, mod_path: str) -> bool:
         """Should the module be added to dependencies ?"""
-        pass
+        if context_name.startswith('.'):
+            return False
+        module = self.project.get_module(context_name)
+        if module:
+            return module.path
+        return self.project.find_module(context_name, mod_path)
 
     def _imported_module(self, node: nodes.Import | nodes.ImportFrom, mod_path: str, relative: bool) -> None:
         """Notify an imported module, used to analyze dependencies."""
-        pass
+        parent = node.frame()
+        if parent not in self.project.modules:
+            return
+        if relative:
+            parent.depends.append(mod_path)
+        else:
+            parent.depends.append(self.project.get_module(mod_path))
 
 class AssociationHandlerInterface(ABC):
     pass
@@ -173,4 +208,22 @@ class OtherAssociationsHandler(AbstractAssociationHandler):
 
 def project_from_files(files: list[str], func_wrapper: _WrapperFuncT=_astroid_wrapper, project_name: str='no name', black_list: tuple[str, ...]=constants.DEFAULT_IGNORE_LIST, verbose: bool=False) -> Project:
     """Return a Project from a list of files or modules."""
-    pass
+    project = Project(project_name)
+    for file in files:
+        if file.endswith('.py'):
+            try:
+                ast = func_wrapper(astroid.MANAGER.ast_from_file, file, None, True)
+                project.modules.append(ast)
+                project.locals[ast.name] = ast
+            except astroid.AstroidBuildingError:
+                if verbose:
+                    print(f"Unable to build AST for {file}")
+        else:
+            try:
+                ast = func_wrapper(astroid.MANAGER.ast_from_module_name, file)
+                project.modules.append(ast)
+                project.locals[ast.name] = ast
+            except astroid.AstroidBuildingError:
+                if verbose:
+                    print(f"Unable to build AST for module {file}")
+    return project
