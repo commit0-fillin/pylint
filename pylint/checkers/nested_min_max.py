@@ -26,4 +26,10 @@ class NestedMinMaxChecker(BaseChecker):
         """Returns true if expression under min/max could be converted to splat
         expression.
         """
-        pass
+        if isinstance(arg, (nodes.List, nodes.Tuple, nodes.Set)):
+            return True
+        if isinstance(arg, nodes.Call):
+            inferred = safe_infer(arg.func)
+            if isinstance(inferred, nodes.ClassDef):
+                return inferred.qname() in SUBSCRIPTABLE_CLASSES_PEP585
+        return False
