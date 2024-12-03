@@ -83,7 +83,7 @@ def _strip_code_flanked_in_backticks(line: str) -> str:
     Pyenchant automatically strips back-ticks when parsing tokens,
     so this cannot be done at the individual filter level.
     """
-    pass
+    return CODE_FLANKED_IN_BACKTICK_REGEX.sub(r'\1\5', line)
 
 class SpellingChecker(BaseTokenChecker):
     """Check spelling in comments and docstrings."""
@@ -94,4 +94,29 @@ class SpellingChecker(BaseTokenChecker):
 
     def _check_docstring(self, node: nodes.FunctionDef | nodes.AsyncFunctionDef | nodes.ClassDef | nodes.Module) -> None:
         """Check if the node has any spelling errors."""
-        pass
+        if not node.doc:
+            return
+        
+        # Get the line number and column offset of the string node
+        lineno = node.lineno
+        col_offset = node.col_offset
+        
+        # If it's a function or class, adjust the line and column numbers
+        if isinstance(node, (nodes.FunctionDef, nodes.AsyncFunctionDef, nodes.ClassDef)):
+            lineno += 1
+            col_offset = 0
+        
+        # Check for spelling errors in the docstring
+        for line in node.doc.splitlines():
+            stripped_line = _strip_code_flanked_in_backticks(line)
+            for word, pos in self.tokenize_str(stripped_line):
+                if not self.check(word):
+                    suggestions = self.spelling_dict.suggest(word)[:self.max_spelling_suggestions]
+                    self.add_message(
+                        'wrong-spelling-in-docstring',
+                        args=(word, line, ' ' * pos + '^', ' or '.join(suggestions)),
+                        node=node,
+                        line=lineno,
+                        col=col_offset + pos,
+                    )
+            lineno += 1
