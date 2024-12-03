@@ -17,4 +17,23 @@ class RunCommand(PrimerCommand):
     @staticmethod
     def _filter_fatal_errors(messages: list[OldJsonExport]) -> list[Message]:
         """Separate fatal errors so we can report them independently."""
-        pass
+        return [
+            Message(
+                msg_id=message['message-id'],
+                symbol=message['symbol'],
+                msg=message['message'],
+                confidence=CONFIDENCE_MAP[UNDEFINED],
+                location=MessageLocationTuple(
+                    abspath=message['path'],
+                    path=message['path'],
+                    module=message['module'],
+                    obj=message['obj'],
+                    line=message['line'],
+                    column=message['column'],
+                    end_line=message.get('endLine'),
+                    end_column=message.get('endColumn'),
+                ),
+            )
+            for message in messages
+            if message['type'] == 'fatal'
+        ]
