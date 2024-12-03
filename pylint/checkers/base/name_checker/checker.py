@@ -37,7 +37,9 @@ def _get_properties(config: argparse.Namespace) -> tuple[set[str], set[str]]:
     Property classes are fully qualified, such as 'abc.abstractproperty' and
     property names are the actual names, such as 'abstract_property'.
     """
-    pass
+    property_classes = set(config.property_classes)
+    property_names = {prop.rsplit('.', 1)[-1] for prop in property_classes}
+    return property_classes, property_names
 
 def _redefines_import(node: nodes.AssignName) -> bool:
     """Detect that the given node (AssignName) is inside an
@@ -45,7 +47,22 @@ def _redefines_import(node: nodes.AssignName) -> bool:
 
     Returns True if the node redefines an import, False otherwise.
     """
-    pass
+    current = node
+    while current and not isinstance(current.parent, nodes.ExceptHandler):
+        current = current.parent
+    if not current:
+        return False
+    
+    try_block = current.parent.parent
+    if not isinstance(try_block, nodes.TryExcept):
+        return False
+    
+    imports = [
+        import_node.names[0][0]
+        for import_node in try_block.body
+        if isinstance(import_node, (nodes.Import, nodes.ImportFrom))
+    ]
+    return node.name in imports
 
 def _determine_function_name_type(node: nodes.FunctionDef, config: argparse.Namespace) -> str:
     """Determine the name type whose regex the function's name should match.
@@ -55,7 +72,20 @@ def _determine_function_name_type(node: nodes.FunctionDef, config: argparse.Name
 
     :returns: One of ('function', 'method', 'attr')
     """
-    pass
+    if not node.is_method():
+        return 'function'
+    
+    if node.decorators:
+        property_classes, property_names = _get_properties(config)
+        for decorator in node.decorators.nodes:
+            if isinstance(decorator, nodes.Name):
+                if decorator.name in property_names:
+                    return 'attr'
+            elif isinstance(decorator, nodes.Call):
+                if isinstance(decorator.func, nodes.Name):
+                    if decorator.func.name in property_names:
+                        return 'attr'
+    return 'method'
 EXEMPT_NAME_CATEGORIES = {'exempt', 'ignore'}
 
 class NameChecker(_BasicChecker):
@@ -76,26 +106,154 @@ class NameChecker(_BasicChecker):
     @utils.only_required_for_messages('disallowed-name', 'invalid-name', 'typevar-name-incorrect-variance', 'typevar-double-variance', 'typevar-name-mismatch')
     def visit_assignname(self, node: nodes.AssignName) -> None:
         """Check module level assigned names."""
-        pass
+        frame = node.frame()
+        assign_type = node.assign_type()
+
+        if isinstance(assign_type, nodes.AugAssign):
+            return
+
+        if isinstance(frame, nodes.Module):
+            if isinstance(assign_type, nodes.Comprehension):
+                self._check_name('inlinevar', node.name, node)
+            else:
+                if _redefines_import(node):
+                    self._check_name('import', node.name, node)
+                else:
+                    self._check_name('const', node.name, node)
+        elif isinstance(frame, nodes.ClassDef):
+            if isinstance(assign_type, nodes.Comprehension):
+                self._check_name('inlinevar', node.name, node)
+            elif isinstance(assign_type, nodes.AssignAttr):
+                self._check_name('attr', node.name, node)
+            elif isinstance(assign_type, nodes.Assign) and not isinstance(
+                utils.safe_infer(assign_type.value), nodes.ClassDef
+            ):
+                if not node.lineno == frame.lineno:
+                    self._check_name('attr', node.name, node)
+        elif isinstance(frame, nodes.FunctionDef):
+            if isinstance(assign_type, nodes.Comprehension):
+                self._check_name('inlinevar', node.name, node)
+            else:
+                self._check_name('variable', node.name, node)
 
     def _recursive_check_names(self, args: list[nodes.AssignName]) -> None:
         """Check names in a possibly recursive list <arg>."""
-        pass
+        for arg in args:
+            if isinstance(arg, nodes.AssignName):
+                self._check_name('argument', arg.name, arg)
+            elif isinstance(arg, (nodes.Tuple, nodes.List)):
+                self._recursive_check_names(arg.elts)
 
     def _check_name(self, node_type: str, name: str, node: nodes.NodeNG, confidence: interfaces.Confidence=interfaces.HIGH, disallowed_check_only: bool=False) -> None:
         """Check for a name using the type's regexp."""
-        pass
+        if name in self.config.good_names:
+            return
+        if name in self.config.bad_names:
+            self.add_message('disallowed-name', node=node, args=(name,), confidence=confidence)
+            return
+        
+        if disallowed_check_only:
+            return
+        
+        regexp = self._name_regexps.get(node_type)
+        if regexp and not regexp.match(name):
+            self.add_message('invalid-name', node=node, args=(node_type, name, regexp.pattern), confidence=confidence)
 
     @staticmethod
     def _assigns_typevar(node: nodes.NodeNG | None) -> bool:
         """Check if a node is assigning a TypeVar."""
-        pass
+        if not isinstance(node, nodes.Assign):
+            return False
+        if not isinstance(node.value, nodes.Call):
+            return False
+        
+        inferred = utils.safe_infer(node.value.func)
+        if not inferred:
+            return False
+        
+        return (
+            isinstance(inferred, nodes.ClassDef)
+            and inferred.qname() in constants.TYPE_VAR_QNAME
+        )
 
     @staticmethod
     def _assigns_typealias(node: nodes.NodeNG | None) -> bool:
         """Check if a node is assigning a TypeAlias."""
-        pass
+        if not isinstance(node, nodes.AnnAssign):
+            return False
+        
+        annotation = node.annotation
+        if isinstance(annotation, nodes.Subscript):
+            annotation = annotation.value
+        
+        if not isinstance(annotation, nodes.Name):
+            return False
+        
+        return annotation.name == "TypeAlias"
 
     def _check_typevar(self, name: str, node: nodes.AssignName) -> None:
         """Check for TypeVar lint violations."""
-        pass
+        if not isinstance(node.parent, nodes.Assign):
+            return
+
+        call = node.parent.value
+        if not isinstance(call, nodes.Call):
+            return
+
+        if len(call.args) < 1 or not isinstance(call.args[0], nodes.Const):
+            return
+
+        typevar_name = call.args[0].value
+        if name != typevar_name:
+            self.add_message(
+                'typevar-name-mismatch',
+                node=node,
+                args=(typevar_name, name),
+                confidence=interfaces.HIGH,
+            )
+
+        if len(call.args) == 1 and not call.keywords:
+            return  # Everything is okay
+
+        if len(call.args) > 1 or (call.keywords and 'bound' in call.keywords):
+            expected_name = name if name.endswith('_co') or name.endswith('_contra') else f'{name}_co'
+            if name != expected_name:
+                self.add_message(
+                    'typevar-name-incorrect-variance',
+                    node=node,
+                    args=(' ' + expected_name[len(name):],),
+                    confidence=interfaces.HIGH,
+                )
+
+        covariant = False
+        contravariant = False
+        for keyword in call.keywords:
+            if keyword.arg == 'covariant' and keyword.value.value:
+                covariant = True
+            elif keyword.arg == 'contravariant' and keyword.value.value:
+                contravariant = True
+
+        if covariant and contravariant:
+            self.add_message(
+                'typevar-double-variance',
+                node=node,
+                confidence=interfaces.HIGH,
+            )
+        elif covariant:
+            expected_suffix = '_co'
+            if not name.endswith(expected_suffix):
+                self.add_message(
+                    'typevar-name-incorrect-variance',
+                    node=node,
+                    args=(expected_suffix,),
+                    confidence=interfaces.HIGH,
+                )
+        elif contravariant:
+            expected_suffix = '_contra'
+            if not name.endswith(expected_suffix):
+                self.add_message(
+                    'typevar-name-incorrect-variance',
+                    node=node,
+                    args=(expected_suffix,),
+                    confidence=interfaces.HIGH,
+                )
