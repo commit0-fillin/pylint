@@ -119,7 +119,18 @@ class TypingChecker(BaseChecker):
 
         Make sure results are safe to recommend / collision free.
         """
-        pass
+        for msg in self._consider_using_alias_msgs:
+            if msg.alias not in self._alias_name_collisions:
+                hint = self._msg_postponed_eval_hint(msg.node)
+                self.add_message(
+                    "consider-using-alias",
+                    node=msg.node,
+                    args=(msg.qname, msg.alias, hint),
+                    confidence=INFERENCE,
+                )
+
+        self._alias_name_collisions.clear()
+        self._consider_using_alias_msgs.clear()
 
     def _check_broken_noreturn(self, node: nodes.Name | nodes.Attribute) -> None:
         """Check for 'NoReturn' inside compound types."""
