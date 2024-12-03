@@ -19,6 +19,16 @@ class NamingStyle:
     DEFAULT_NAME_RGX: Pattern[str] = ANY
     CLASS_ATTRIBUTE_RGX: Pattern[str] = ANY
 
+    @classmethod
+    def get_regex(cls, name_type: str) -> Pattern[str]:
+        """Get the regex pattern for a specific name type."""
+        return getattr(cls, f"{name_type.upper()}_NAME_RGX", cls.DEFAULT_NAME_RGX)
+
+    @classmethod
+    def validate_name(cls, name: str, name_type: str) -> bool:
+        """Validate if a name matches the style for a specific name type."""
+        return bool(cls.get_regex(name_type).match(name))
+
 class SnakeCaseStyle(NamingStyle):
     """Regex rules for snake_case naming style."""
     CLASS_NAME_RGX = re.compile('[^\\W\\dA-Z][^\\WA-Z]*$')
@@ -56,6 +66,7 @@ class UpperCaseStyle(NamingStyle):
     CLASS_ATTRIBUTE_RGX = re.compile('[^\\W\\da-z][^\\Wa-z]*$')
 
 class AnyStyle(NamingStyle):
+    """Style that accepts any name."""
     pass
 NAMING_STYLES = {'snake_case': SnakeCaseStyle, 'camelCase': CamelCaseStyle, 'PascalCase': PascalCaseStyle, 'UPPER_CASE': UpperCaseStyle, 'any': AnyStyle}
 KNOWN_NAME_TYPES_WITH_STYLE = {'module', 'const', 'class', 'function', 'method', 'attr', 'argument', 'variable', 'class_attribute', 'class_const', 'inlinevar'}
