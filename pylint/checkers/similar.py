@@ -141,7 +141,19 @@ def hash_lineset(lineset: LineSet, min_common_lines: int=DEFAULT_MIN_SIMILARITY_
     :return: a dict linking hashes to corresponding start index and a dict that links this
              index to the start and end lines in the file
     """
-    pass
+    hash_to_index = defaultdict(list)
+    index_to_lines = {}
+    
+    for idx in range(len(lineset._stripped_lines) - min_common_lines + 1):
+        lines = [line.text for line in lineset._stripped_lines[idx:idx + min_common_lines]]
+        chunk = LinesChunk(lineset.name, idx, *lines)
+        hash_to_index[chunk].append(Index(idx))
+        
+        start_line = lineset._stripped_lines[idx].line_number
+        end_line = lineset._stripped_lines[idx + min_common_lines - 1].line_number
+        index_to_lines[Index(idx)] = SuccessiveLinesLimits(LineNumber(start_line), LineNumber(end_line))
+    
+    return hash_to_index, index_to_lines
 
 def remove_successive(all_couples: CplIndexToCplLines_T) -> None:
     """Removes all successive entries in the dictionary in argument.
@@ -168,7 +180,17 @@ def remove_successive(all_couples: CplIndexToCplLines_T) -> None:
     {(11, 34): ([5, 10], [27, 32]),
      (23, 79): ([15, 19], [45, 49])}
     """
-    pass
+    keys = sorted(all_couples.keys())
+    for i in range(len(keys) - 1):
+        current_key, next_key = keys[i], keys[i + 1]
+        if (current_key[0] + 1 == next_key[0] and
+            current_key[1] + 1 == next_key[1]):
+            current_value = all_couples[current_key]
+            next_value = all_couples[next_key]
+            current_value.first_file._end = next_value.first_file._end
+            current_value.second_file._end = next_value.second_file._end
+            current_value.effective_cmn_lines_nb += next_value.effective_cmn_lines_nb
+            del all_couples[next_key]
 
 def filter_noncode_lines(ls_1: LineSet, stindex_1: Index, ls_2: LineSet, stindex_2: Index, common_lines_nb: int) -> int:
     """Return the effective number of common lines between lineset1
@@ -185,7 +207,13 @@ def filter_noncode_lines(ls_1: LineSet, stindex_1: Index, ls_2: LineSet, stindex
     :param common_lines_nb: number of common successive stripped lines before being filtered from non code lines
     :return: the number of common successive stripped lines that contain code
     """
-    pass
+    effective_common_lines = 0
+    for i in range(common_lines_nb):
+        line1 = ls_1[stindex_1 + i].text.strip()
+        line2 = ls_2[stindex_2 + i].text.strip()
+        if line1 and line2 and REGEX_FOR_LINES_WITH_CONTENT.match(line1) and REGEX_FOR_LINES_WITH_CONTENT.match(line2):
+            effective_common_lines += 1
+    return effective_common_lines
 
 class Commonality(NamedTuple):
     cmn_lines_nb: int
@@ -213,11 +241,22 @@ class Similar:
 
     def append_stream(self, streamid: str, stream: STREAM_TYPES, encoding: str | None=None) -> None:
         """Append a file to search for similarities."""
-        pass
+        if isinstance(stream, TextIO):
+            data = stream.read()
+        else:
+            data = stream.read().decode(encoding or 'utf-8')
+        
+        lines = data.splitlines()
+        self.linesets.append(LineSet(streamid, lines,
+                                     self.namespace.ignore_comments,
+                                     self.namespace.ignore_docstrings,
+                                     self.namespace.ignore_imports,
+                                     self.namespace.ignore_signatures))
 
     def run(self) -> None:
         """Start looking for similarities and display results on stdout."""
-        pass
+        similarities = self._compute_sims()
+        self._display_sims(similarities)
 
     def _compute_sims(self) -> list[tuple[int, set[LinesChunkLimits_T]]]:
         """Compute similarities in appended files."""
