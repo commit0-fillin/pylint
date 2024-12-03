@@ -49,7 +49,13 @@ class FormatChecker(BaseTokenChecker, BaseRawFileChecker):
 
     def new_line(self, tokens: TokenWrapper, line_end: int, line_start: int) -> None:
         """A new line has been encountered, process it if necessary."""
-        pass
+        if line_start > len(self._lines):
+            return
+        line = self._lines[line_start]
+        line = line.rstrip('\n\r')
+        self._lines[line_start] = line
+        if line:
+            self.check_lines(tokens, line_start, line + '\n', line_end)
 
     def _check_keyword_parentheses(self, tokens: list[tokenize.TokenInfo], start: int) -> None:
         """Check that there are not unnecessary parentheses after a keyword.
@@ -61,7 +67,48 @@ class FormatChecker(BaseTokenChecker, BaseRawFileChecker):
         tokens: The entire list of Tokens.
         start: The position of the keyword in the token list.
         """
-        pass
+        if start >= len(tokens) - 2:
+            return
+        if tokens[start + 1].string != '(':
+            return
+        found_and_or = False
+        depth = 0
+        keyword_token = tokens[start]
+        for i in range(start + 1, len(tokens)):
+            token = tokens[i]
+            if token.string == '(':
+                depth += 1
+            elif token.string == ')':
+                depth -= 1
+                if depth == 0:
+                    # If the closing parenthesis is on a different line than the
+                    # opening paren, we don't want to classify it as redundant.
+                    if token.start[0] != keyword_token.start[0]:
+                        return
+                    # If there's anything except the closing paren after the
+                    # keyword, the parentheses are not redundant.
+                    if i != start + 3:
+                        return
+                    if found_and_or:
+                        return
+                    self.add_message(
+                        'superfluous-parens',
+                        line=keyword_token.start[0],
+                        args=keyword_token.string,
+                    )
+                    return
+            elif depth == 1:
+                # If there's a comma or semicolon, the parentheses are not redundant.
+                if token.string in ',:':
+                    return
+                # 'and' and 'or' are always in parentheses.
+                if token.string in ('and', 'or'):
+                    found_and_or = True
+                    return
+            elif depth == 0:
+                # If there's anything except the closing paren after the
+                # keyword, the parentheses are not redundant.
+                return
 
     def process_tokens(self, tokens: list[tokenize.TokenInfo]) -> None:
         """Process tokens and search for:
@@ -70,41 +117,121 @@ class FormatChecker(BaseTokenChecker, BaseRawFileChecker):
         - optionally bad construct (if given, bad_construct must be a compiled
           regular expression).
         """
-        pass
+        indents = [0]
+        check_equal = False
+        line_num = 0
+        line_start = 0
+        prev_line_start = -1
+        for idx, token in enumerate(tokens):
+            token_type, token_string, start, _, _ = token
+            if token_type == tokenize.NEWLINE:
+                line_start = idx + 1
+                self.new_line(TokenWrapper(tokens[prev_line_start:line_start]), start[0], prev_line_start)
+                prev_line_start = line_start
+                line_num += 1
+            elif token_type == tokenize.INDENT:
+                indents.append(indents[-1] + len(token_string))
+                check_equal = True
+                line_num += 1
+            elif token_type == tokenize.DEDENT:
+                if len(indents) > 1:
+                    if check_equal and indents[-1] != indents[-2]:
+                        self.add_message('bad-indentation', line=line_num,
+                                         args=(token_string, indents[-1], indents[-2]))
+                    indents.pop()
+                check_equal = True
+            elif token_type == tokenize.NL:
+                line_num += 1
+            elif token_string in ('return', 'yield', 'del', 'pass', 'break', 'continue'):
+                self._check_keyword_parentheses(tokens, idx)
+        self.new_line(TokenWrapper(tokens[prev_line_start:]), tokens[-1].start[0], prev_line_start)
 
     @only_required_for_messages('multiple-statements')
     def visit_default(self, node: nodes.NodeNG) -> None:
         """Check the node line number and check it if not yet done."""
-        pass
+        if isinstance(node, nodes.Module):
+            return
+        if node.root().file.endswith('__init__.py'):
+            return
+        if node.lineno not in self._visited_lines:
+            self._visited_lines[node.lineno] = 1
+            self._check_multi_statement_line(node, node.lineno)
+        elif self._visited_lines[node.lineno] == 1:
+            self._visited_lines[node.lineno] = 2
 
     def _check_multi_statement_line(self, node: nodes.NodeNG, line: int) -> None:
         """Check for lines containing multiple statements."""
-        pass
+        if isinstance(node.parent, (nodes.Lambda, nodes.ListComp, nodes.SetComp, nodes.DictComp, nodes.GeneratorExp)):
+            return
+        if isinstance(node, (nodes.With, nodes.TryExcept, nodes.TryFinally)):
+            return
+        if isinstance(node, nodes.Expr) and isinstance(node.value, nodes.Yield):
+            return
+        stmt = node.statement()
+        if stmt.fromlineno == stmt.tolineno:
+            return
+        if line in self._ignored_lines:
+            return
+        self.add_message('multiple-statements', node=node)
 
     def check_trailing_whitespace_ending(self, line: str, i: int) -> None:
         """Check that there is no trailing white-space."""
-        pass
+        stripped_line = line.rstrip('\n\r')
+        if stripped_line != stripped_line.rstrip():
+            self.add_message('trailing-whitespace', line=i)
 
     def check_line_length(self, line: str, i: int, checker_off: bool) -> None:
         """Check that the line length is less than the authorized value."""
-        pass
+        max_chars = self.config.max_line_length
+        ignore_long_line = self.config.ignore_long_lines
+        line = line.rstrip()
+        if len(line) > max_chars and not checker_off:
+            if ignore_long_line.search(line):
+                return
+            self.add_message('line-too-long', line=i, args=(len(line), max_chars))
 
     @staticmethod
     def remove_pylint_option_from_lines(options_pattern_obj: Match[str]) -> str:
         """Remove the `# pylint ...` pattern from lines."""
-        pass
+        lines = options_pattern_obj.string.splitlines(True)
+        pylint_pattern = re.compile(r'#.*pylint:')
+        result = []
+        for line in lines:
+            if pylint_pattern.search(line):
+                line = pylint_pattern.sub('', line)
+                if line.strip() == '':
+                    continue
+            result.append(line)
+        return ''.join(result)
 
     @staticmethod
     def is_line_length_check_activated(pylint_pattern_match_object: Match[str]) -> bool:
         """Return True if the line length check is activated."""
-        pass
+        try:
+            for pragma in parse_pragma(pylint_pattern_match_object.group()):
+                if 'disable' in pragma.action and 'line-too-long' in pragma.messages:
+                    return False
+                if 'enable' in pragma.action and 'line-too-long' in pragma.messages:
+                    return True
+        except PragmaParserError:
+            # We can't parse the line, so we consider the check activated
+            return True
+        return True
 
     @staticmethod
     def specific_splitlines(lines: str) -> list[str]:
         """Split lines according to universal newlines except those in a specific
         sets.
         """
-        pass
+        idx = 0
+        lines_list = []
+        for match in re.finditer(r'\r\n|\r|\n', lines):
+            end = match.start()
+            lines_list.append(lines[idx:end])
+            idx = match.end()
+        if idx < len(lines):
+            lines_list.append(lines[idx:])
+        return lines_list
 
     def check_lines(self, tokens: TokenWrapper, line_start: int, lines: str, lineno: int) -> None:
         """Check given lines for potential messages.
@@ -114,8 +241,38 @@ class FormatChecker(BaseTokenChecker, BaseRawFileChecker):
         - no trailing white-space
         - less than a maximum number of characters
         """
-        pass
+        lines_list = self.specific_splitlines(lines)
+        checker_off = False
+        for i, line in enumerate(lines_list):
+            line_num = i + lineno
+
+            if line.endswith('\n'):
+                self.check_trailing_whitespace_ending(line, line_num)
+
+            pylint_pattern_match_object = OPTION_PO.search(line)
+            if pylint_pattern_match_object:
+                checker_off = not self.is_line_length_check_activated(pylint_pattern_match_object)
+                line = self.remove_pylint_option_from_lines(pylint_pattern_match_object)
+
+            self.check_line_length(line, line_num, checker_off)
+
+        if lines and not lines.endswith('\n'):
+            self.add_message('missing-final-newline', line=lineno + len(lines_list))
+        elif len(lines_list) > 1 and not lines_list[-1]:
+            self.add_message('trailing-newlines', line=lineno + len(lines_list) - 1)
 
     def check_indent_level(self, string: str, expected: int, line_num: int) -> None:
         """Return the indent level of the string."""
-        pass
+        indent = self.config.indent_string
+        if indent == '\\t':  # \t is not interpreted in the configuration file
+            indent = '\t'
+        level = 0
+        for char in string:
+            if char == ' ':
+                level += 1
+            elif char == '\t':
+                level += len(indent)
+            else:
+                break
+        if level != expected:
+            self.add_message('bad-indentation', args=(level, expected), line=line_num)
