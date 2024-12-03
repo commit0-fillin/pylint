@@ -11,5 +11,6 @@ def get_numversion_from_version(v: str) -> tuple[int, int, int]:
     See https://github.com/pylint-dev/pylint/issues/4399
     https://github.com/pylint-dev/pylint/issues/4420,
     """
-    pass
+    parts = v.split('.')
+    return tuple(int(part) for part in parts[:3])
 numversion = get_numversion_from_version(__version__)
