@@ -31,19 +31,46 @@ class FileState:
         """Recursively walk (depth first) AST to collect block level options
         line numbers and set the state correctly.
         """
-        pass
+        first_child = node.first_child()
+        if first_child:
+            self._set_message_state_in_block(msg, msg_state, node, first_child.fromlineno)
+        else:
+            self._set_message_state_in_block(msg, msg_state, node, node.fromlineno)
+        
+        for child in node.get_children():
+            self._set_state_on_block_lines(msgs_store, child, msg, msg_state)
 
     def _set_message_state_in_block(self, msg: MessageDefinition, lines: dict[int, bool], node: nodes.NodeNG, firstchildlineno: int) -> None:
         """Set the state of a message in a block of lines."""
-        pass
+        start = node.fromlineno
+        end = node.tolineno
+        for line in range(start, firstchildlineno):
+            self._set_message_state_on_line(msg, line, lines.get(start, True), start)
+        for line in range(firstchildlineno, end + 1):
+            self._set_message_state_on_line(msg, line, lines.get(line, True), line)
 
     def _set_message_state_on_line(self, msg: MessageDefinition, line: int, state: bool, original_lineno: int) -> None:
         """Set the state of a message on a line."""
-        pass
+        if msg.msgid not in self._module_msgs_state:
+            self._module_msgs_state[msg.msgid] = {}
+        self._module_msgs_state[msg.msgid][line] = state
+        
+        if msg.msgid not in self._raw_module_msgs_state:
+            self._raw_module_msgs_state[msg.msgid] = {}
+        self._raw_module_msgs_state[msg.msgid][original_lineno] = state
 
     def set_msg_status(self, msg: MessageDefinition, line: int, status: bool, scope: str='package') -> None:
         """Set status (enabled/disable) for a given message at a given line."""
-        pass
+        assert line > 0
+        
+        if msg.msgid not in self._module_msgs_state:
+            self._module_msgs_state[msg.msgid] = {}
+        
+        if scope == 'package':
+            for current_line in range(line, self._effective_max_line_number + 1):
+                self._module_msgs_state[msg.msgid][current_line] = status
+        else:
+            self._module_msgs_state[msg.msgid][line] = status
 
     def handle_ignored_message(self, state_scope: Literal[0, 1, 2] | None, msgid: str, line: int | None) -> None:
         """Report an ignored message.
@@ -52,4 +79,12 @@ class FileState:
         depending on whether the message was disabled locally in the module,
         or globally.
         """
-        pass
+        if state_scope == MSG_STATE_SCOPE_MODULE:
+            if line in self._suppression_mapping:
+                self._suppression_mapping[(msgid, line)] = self._suppression_mapping.pop((msgid, line))
+            else:
+                self._suppression_mapping[(msgid, line)] = line
+        elif line is None:
+            self._ignored_msgs[(msgid, 0)].add(0)
+        else:
+            self._ignored_msgs[(msgid, line)].add(line)
