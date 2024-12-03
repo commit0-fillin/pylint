@@ -45,13 +45,24 @@ class VariableVisitConsumerAction(Enum):
 
 def _is_from_future_import(stmt: nodes.ImportFrom, name: str) -> bool | None:
     """Check if the name is a future import from another module."""
-    pass
+    if stmt.modname == FUTURE:
+        for import_name, import_as_name in stmt.names:
+            if import_name == name:
+                return True
+    return None
 
 def _get_unpacking_extra_info(node: nodes.Assign, inferred: InferenceResult) -> str:
     """Return extra information to add to the message for unpacking-non-sequence
     and unbalanced-tuple/dict-unpacking errors.
     """
-    pass
+    more = ""
+    if isinstance(inferred, astroid.Instance):
+        actual_type = inferred.name
+        if node.value.parent_of(inferred.ast_node):
+            more = f" (inferred type is '{actual_type}')"
+    elif isinstance(inferred, astroid.ClassDef):
+        more = f" (type is '{inferred.name}')"
+    return more
 
 def _detect_global_scope(node: nodes.Name, frame: nodes.LocalsDictNodeNG, defframe: nodes.LocalsDictNodeNG) -> bool:
     """Detect that the given frames share a global scope.
@@ -76,7 +87,21 @@ def _detect_global_scope(node: nodes.Name, frame: nodes.LocalsDictNodeNG, deffra
                 class B(C): ...
         class C: ...
     """
-    pass
+    def_scope = defframe.scope()
+    node_scope = frame.scope()
+    if def_scope.parent == node_scope.parent:
+        # If the scopes share the same parent, they are not in global scope
+        return False
+    
+    while frame and not isinstance(frame, nodes.Module):
+        if isinstance(frame, nodes.FunctionDef):
+            return False
+        frame = frame.parent.frame()
+    while defframe and not isinstance(defframe, nodes.Module):
+        if isinstance(defframe, nodes.FunctionDef):
+            return False
+        defframe = defframe.parent.frame()
+    return True
 
 def _fix_dot_imports(not_consumed: dict[str, list[nodes.NodeNG]]) -> list[tuple[str, _base_nodes.ImportNode]]:
     """Try to fix imports with multiple dots, by returning a dictionary
