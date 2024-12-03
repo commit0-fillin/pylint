@@ -48,4 +48,31 @@ class FunctionalPyreverseTestfile(NamedTuple):
 
 def get_functional_test_files(root_directory: Path) -> list[FunctionalPyreverseTestfile]:
     """Get all functional test files from the given directory."""
-    pass
+    test_files = []
+    for source_file in root_directory.glob("**/*.py"):
+        config_file = source_file.with_suffix(".rc")
+        if config_file.exists():
+            options = _parse_config_file(config_file)
+            test_files.append(FunctionalPyreverseTestfile(source=source_file, options=options))
+    return test_files
+
+def _parse_config_file(config_file: Path) -> TestFileOptions:
+    """Parse the configuration file for a test."""
+    config = configparser.ConfigParser()
+    config.read(config_file)
+    
+    options: TestFileOptions = {
+        "source_roots": [],
+        "output_formats": [],
+        "command_line_args": []
+    }
+    
+    if config.has_section("options"):
+        if config.has_option("options", "source_roots"):
+            options["source_roots"] = [s.strip() for s in config.get("options", "source_roots").split(",")]
+        if config.has_option("options", "output_formats"):
+            options["output_formats"] = [s.strip() for s in config.get("options", "output_formats").split(",")]
+        if config.has_option("options", "command_line_args"):
+            options["command_line_args"] = shlex.split(config.get("options", "command_line_args"))
+    
+    return options
