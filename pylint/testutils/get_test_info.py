@@ -14,4 +14,19 @@ def _get_tests_info(input_dir: str, msg_dir: str, prefix: str, suffix: str) -> l
         message for python >=  x.y ->  message =  <name>_pyxy.txt
         lower versions             ->  message with highest num
     """
-    pass
+    result = []
+    for fname in glob(join(input_dir, prefix + "*" + suffix)):
+        infile = basename(fname)
+        fbase = splitext(infile)[0]
+        # Handle the case for python version specific test files
+        if fbase.endswith(SYS_VERS_STR):
+            message_file = join(msg_dir, fbase + '.txt')
+        else:
+            # Find the highest version message file
+            message_files = glob(join(msg_dir, fbase + '_py*.txt'))
+            message_file = max(message_files, default='')
+        
+        if message_file:
+            result.append((infile, basename(message_file)))
+    
+    return result
