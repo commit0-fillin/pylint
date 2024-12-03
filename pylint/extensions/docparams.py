@@ -44,7 +44,28 @@ class DocstringParameterChecker(BaseChecker):
         :param node: Node for a function or method definition in the AST
         :type node: :class:`astroid.scoped_nodes.Function`
         """
-        pass
+        if not node.doc:
+            return  # No docstring, no need to check
+
+        doc = utils.parse_docstring(node)
+        self.check_arguments_in_docstring(doc, node.args, node)
+        
+        # Check return values
+        if node.returns:
+            return_nodes = node.nodes_of_class(nodes.Return)
+            if return_nodes:
+                self.check_return_doc(node, doc)
+            else:
+                self.add_message(
+                    "redundant-returns-doc",
+                    node=node,
+                    confidence=HIGH,
+                )
+        elif any(isinstance(child, nodes.Return) for child in node.body if child.value is not None):
+            self.check_return_doc(node, doc)
+
+        # Check raised exceptions
+        self.check_raises_doc(node, doc)
     visit_asyncfunctiondef = visit_functiondef
     visit_yieldfrom = visit_yield
 
@@ -53,32 +74,38 @@ class DocstringParameterChecker(BaseChecker):
         generate a message if there are arguments missing.
 
         :param found_argument_names: argument names found in the docstring
-
         :param message_id: pylint message id
-
         :param not_needed_names: names that may be omitted
-
         :param expected_argument_names: Expected argument names
-
         :param warning_node: The node to be analyzed
         """
-        pass
+        missing_args = (expected_argument_names - found_argument_names) - not_needed_names
+        if missing_args:
+            self.add_message(
+                message_id,
+                args=(", ".join(sorted(missing_args)),),
+                node=warning_node,
+                confidence=HIGH,
+            )
 
     def _compare_different_args(self, found_argument_names: set[str], message_id: str, not_needed_names: set[str], expected_argument_names: set[str], warning_node: nodes.NodeNG) -> None:
         """Compare the found argument names with the expected ones and
         generate a message if there are extra arguments found.
 
         :param found_argument_names: argument names found in the docstring
-
         :param message_id: pylint message id
-
         :param not_needed_names: names that may be omitted
-
         :param expected_argument_names: Expected argument names
-
         :param warning_node: The node to be analyzed
         """
-        pass
+        different_args = (found_argument_names - expected_argument_names) - not_needed_names
+        if different_args:
+            self.add_message(
+                message_id,
+                args=(", ".join(sorted(different_args)),),
+                node=warning_node,
+                confidence=HIGH,
+            )
 
     def _compare_ignored_args(self, found_argument_names: set[str], message_id: str, ignored_argument_names: set[str], warning_node: nodes.NodeNG) -> None:
         """Compare the found argument names with the ignored ones and
@@ -89,7 +116,14 @@ class DocstringParameterChecker(BaseChecker):
         :param ignored_argument_names: Expected argument names
         :param warning_node: The node to be analyzed
         """
-        pass
+        ignored_args = found_argument_names & ignored_argument_names
+        if ignored_args:
+            self.add_message(
+                message_id,
+                args=(", ".join(sorted(ignored_args)),),
+                node=warning_node,
+                confidence=HIGH,
+            )
 
     def check_arguments_in_docstring(self, doc: Docstring, arguments_node: astroid.Arguments, warning_node: astroid.NodeNG, accept_no_param_doc: bool | None=None) -> None:
         """Check that all parameters are consistent with the parameters mentioned
@@ -122,7 +156,44 @@ class DocstringParameterChecker(BaseChecker):
             documented. If None then this value is read from the configuration.
         :type accept_no_param_doc: bool or None
         """
-        pass
+        if accept_no_param_doc is None:
+            accept_no_param_doc = self.config.accept_no_param_doc
+
+        expected_argument_names = set(arguments_node.arguments)
+        expected_argument_names.update(arguments_node.kwonlyargs)
+
+        if arguments_node.vararg:
+            expected_argument_names.add(arguments_node.vararg)
+        if arguments_node.kwarg:
+            expected_argument_names.add(arguments_node.kwarg)
+
+        found_argument_names = set(doc.params.keys())
+        not_needed_names = self.not_needed_param_in_docstring
+
+        if doc.params and not accept_no_param_doc:
+            self._compare_missing_args(
+                found_argument_names,
+                'missing-param-doc',
+                not_needed_names,
+                expected_argument_names,
+                warning_node,
+            )
+
+            self._compare_different_args(
+                found_argument_names,
+                'differing-param-doc',
+                not_needed_names,
+                expected_argument_names,
+                warning_node,
+            )
+
+        if doc.params and not accept_no_param_doc:
+            self._compare_ignored_args(
+                found_argument_names,
+                'useless-param-doc',
+                not_needed_names,
+                warning_node,
+            )
 
     def _add_raise_message(self, missing_exceptions: set[str], node: nodes.FunctionDef) -> None:
         """Adds a message on :param:`node` for the missing exception type.
@@ -130,4 +201,10 @@ class DocstringParameterChecker(BaseChecker):
         :param missing_exceptions: A list of missing exception types.
         :param node: The node show the message on.
         """
-        pass
+        if missing_exceptions:
+            self.add_message(
+                'missing-raises-doc',
+                args=(', '.join(sorted(missing_exceptions)),),
+                node=node,
+                confidence=HIGH,
+            )
