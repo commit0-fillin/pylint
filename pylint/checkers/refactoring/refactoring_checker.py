@@ -25,7 +25,10 @@ CALLS_RETURNING_CONTEXT_MANAGERS = frozenset(('_io.open', 'pathlib.Path.open', '
 
 def _except_statement_is_always_returning(node: nodes.Try, returning_node_class: nodes.NodeNG) -> bool:
     """Detect if all except statements return."""
-    pass
+    for handler in node.handlers:
+        if not isinstance(handler.body[-1], returning_node_class):
+            return False
+    return bool(node.handlers)
 
 def _is_trailing_comma(tokens: list[tokenize.TokenInfo], index: int) -> bool:
     """Check if the given token is a trailing comma.
@@ -36,19 +39,50 @@ def _is_trailing_comma(tokens: list[tokenize.TokenInfo], index: int) -> bool:
     :returns: True if the token is a comma which trails an expression
     :rtype: bool
     """
-    pass
+    token = tokens[index]
+    if token.exact_type != tokenize.COMMA:
+        return False
+    
+    # Skip whitespace and comments
+    next_token_index = index + 1
+    while next_token_index < len(tokens) and tokens[next_token_index].type in (tokenize.NL, tokenize.COMMENT):
+        next_token_index += 1
+    
+    if next_token_index >= len(tokens):
+        return True
+    
+    next_token = tokens[next_token_index]
+    return next_token.exact_type in (tokenize.RPAR, tokenize.RBRACE, tokenize.RBRACKET)
 
 def _is_part_of_with_items(node: nodes.Call) -> bool:
     """Checks if one of the node's parents is a ``nodes.With`` node and that the node
     itself is located somewhere under its ``items``.
     """
-    pass
+    parent = node.parent
+    while parent:
+        if isinstance(parent, nodes.With):
+            for item in parent.items:
+                if node.parent_of(item.context_expr) or node is item.context_expr:
+                    return True
+        parent = parent.parent
+    return False
 
 def _will_be_released_automatically(node: nodes.Call) -> bool:
     """Checks if a call that could be used in a ``with`` statement is used in an
     alternative construct which would ensure that its __exit__ method is called.
     """
-    pass
+    parent = node.parent
+    while parent:
+        if isinstance(parent, (nodes.FunctionDef, nodes.ClassDef)):
+            break
+        if isinstance(parent, nodes.Try):
+            for handler in parent.handlers:
+                if isinstance(handler.type, nodes.Name) and handler.type.name == 'Exception':
+                    return True
+            if parent.finalbody:
+                return True
+        parent = parent.parent
+    return False
 
 def _is_part_of_assignment_target(node: nodes.NodeNG) -> bool:
     """Check whether use of a variable is happening as part of the left-hand
