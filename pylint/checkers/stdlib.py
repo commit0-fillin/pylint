@@ -62,16 +62,80 @@ class StdlibChecker(DeprecatedMixin, BaseChecker):
     @utils.only_required_for_messages('bad-open-mode', 'redundant-unittest-assert', 'deprecated-method', 'deprecated-argument', 'bad-thread-instantiation', 'shallow-copy-environ', 'invalid-envvar-value', 'invalid-envvar-default', 'subprocess-popen-preexec-fn', 'subprocess-run-check', 'deprecated-class', 'unspecified-encoding', 'forgotten-debug-statement')
     def visit_call(self, node: nodes.Call) -> None:
         """Visit a Call node."""
-        pass
+        if isinstance(node.func, nodes.Name):
+            name = node.func.name
+            # Check for various issues
+            if name in OPEN_FILES_MODE:
+                self._check_open_call(node, name)
+            elif name == 'thread':
+                self._check_thread_instantiation(node)
+            elif name == 'copy':
+                self._check_shallow_copy_environ(node)
+            elif name in ENV_GETTERS:
+                self._check_env_function(node, name)
+            elif name == 'subprocess.Popen':
+                self._check_subprocess_popen(node)
+            elif name == 'subprocess.run':
+                self._check_subprocess_run(node)
+        
+        # Check for deprecated methods, arguments, and classes
+        self._check_deprecated_method(node)
+        self._check_deprecated_argument(node)
+        self._check_deprecated_class(node)
+        
+        # Check for unspecified encoding in open() calls
+        if isinstance(node.func, nodes.Attribute) and node.func.attrname in OPEN_FILES_FUNCS:
+            self._check_open_encoding(node)
+        
+        # Check for forgotten debug statements
+        if isinstance(node.func, (nodes.Name, nodes.Attribute)):
+            self._check_forgotten_debug_statement(node)
 
     def _check_lru_cache_decorators(self, node: nodes.FunctionDef) -> None:
         """Check if instance methods are decorated with functools.lru_cache."""
-        pass
+        if not node.decorators:
+            return
+
+        for decorator in node.decorators.nodes:
+            if isinstance(decorator, nodes.Call):
+                decorator = decorator.func
+            if not isinstance(decorator, (nodes.Name, nodes.Attribute)):
+                continue
+
+            if utils.is_typing_member(decorator, ('lru_cache', 'cache')):
+                if utils.is_attribute_typed_annotation(node.parent, node.name):
+                    continue
+                if utils.decorated_with(node, ('staticmethod', 'classmethod')):
+                    continue
+                if utils.get_node_first_ancestor_of_type(node, nodes.ClassDef):
+                    self.add_message(
+                        'method-cache-max-size-none',
+                        node=node,
+                        args=(decorator.as_string(),),
+                    )
 
     def _check_datetime(self, node: nodes.NodeNG) -> None:
         """Check that a datetime was inferred, if so, emit boolean-datetime warning."""
-        pass
+        try:
+            inferred = next(node.infer())
+        except astroid.InferenceError:
+            return
+        if isinstance(inferred, astroid.Instance) and inferred.qname() == 'datetime.time':
+            self.add_message('boolean-datetime', node=node)
 
     def _check_open_call(self, node: nodes.Call, open_module: str, func_name: str) -> None:
         """Various checks for an open call."""
-        pass
+        if open_module not in OPEN_MODULE:
+            return
+        if node.keywords:
+            mode = utils.get_argument_from_call(node, position=1, keyword='mode')
+            if isinstance(mode, nodes.Const):
+                mode_value = mode.value
+                if mode_value not in ('r', 'rb', 'r+', 'rb+', 'w', 'wb', 'w+', 'wb+', 'a', 'ab', 'a+', 'ab+'):
+                    self.add_message('bad-open-mode', node=node, args=mode_value)
+        elif len(node.args) >= 2:
+            mode = node.args[1]
+            if isinstance(mode, nodes.Const):
+                mode_value = mode.value
+                if mode_value not in ('r', 'rb', 'r+', 'rb+', 'w', 'wb', 'w+', 'wb+', 'a', 'ab', 'a+', 'ab+'):
+                    self.add_message('bad-open-mode', node=node, args=mode_value)
