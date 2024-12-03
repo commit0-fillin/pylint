@@ -19,4 +19,15 @@ class ModifiedIterationChecker(checkers.BaseChecker):
 
     def _modified_iterating_check_on_node_and_children(self, body_node: nodes.NodeNG, iter_obj: nodes.NodeNG) -> None:
         """See if node or any of its children raises modified iterating messages."""
-        pass
+        if isinstance(body_node, nodes.Call):
+            if isinstance(body_node.func, nodes.Attribute):
+                if isinstance(body_node.func.expr, nodes.Name) and body_node.func.expr.name == iter_obj.name:
+                    if body_node.func.attrname in _LIST_MODIFIER_METHODS:
+                        self.add_message("modified-iterating-list", node=body_node, args=(iter_obj.name,))
+                    elif body_node.func.attrname in _SET_MODIFIER_METHODS:
+                        self.add_message("modified-iterating-set", node=body_node, args=(iter_obj.name,))
+                    elif body_node.func.attrname in ("update", "pop", "clear"):
+                        self.add_message("modified-iterating-dict", node=body_node, args=(iter_obj.name,))
+
+        for child_node in body_node.get_children():
+            self._modified_iterating_check_on_node_and_children(child_node, iter_obj)
