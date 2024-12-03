@@ -20,9 +20,39 @@ class ElseifUsedChecker(BaseTokenChecker):
 
     def process_tokens(self, tokens: list[TokenInfo]) -> None:
         """Process tokens and look for 'if' or 'elif'."""
-        pass
+        for index, token in enumerate(tokens):
+            if token.exact_type == tokenize.NAME and token.string in ('if', 'elif'):
+                self._check_elif(tokens, index)
+
+    def _check_elif(self, tokens: list[TokenInfo], if_index: int) -> None:
+        """Check for 'else' followed by 'if' when 'elif' could be used."""
+        # Look for 'else' token
+        for token in tokens[if_index + 1:]:
+            if token.exact_type == tokenize.NAME and token.string == 'else':
+                # Found 'else', now look for 'if'
+                for next_token in tokens[tokens.index(token) + 1:]:
+                    if next_token.exact_type == tokenize.NAME:
+                        if next_token.string == 'if':
+                            # Found 'else if', report the issue
+                            self.add_message(
+                                'else-if-used',
+                                line=next_token.start[0]
+                            )
+                        break
+                break
 
     @only_required_for_messages('else-if-used')
     def visit_if(self, node: nodes.If) -> None:
         """Current if node must directly follow an 'else'."""
-        pass
+        parent = node.parent
+        if isinstance(parent, nodes.Expr):
+            parent = parent.parent
+        if not isinstance(parent, nodes.If):
+            return
+        if not parent.orelse:
+            return
+        if len(parent.orelse) != 1:
+            return
+        if node != parent.orelse[0]:
+            return
+        self.add_message('else-if-used', node=node)
