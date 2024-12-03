@@ -24,5 +24,26 @@ class NewStyleConflictChecker(BaseChecker):
     @only_required_for_messages('bad-super-call')
     def visit_functiondef(self, node: nodes.FunctionDef) -> None:
         """Check use of super."""
-        pass
+        if node.is_method():
+            for stmt in node.body:
+                if isinstance(stmt, nodes.Call):
+                    if is_super(stmt.func):
+                        self._check_super_call(stmt, node)
+
+    def _check_super_call(self, super_call: nodes.Call, method: nodes.FunctionDef) -> None:
+        """Check if the super call is valid."""
+        if len(super_call.args) not in (0, 1, 2):
+            return  # Not a valid super() call, but that's not what we're checking
+
+        if len(super_call.args) == 0:
+            # Python 3 form of super(), always correct
+            return
+
+        arg = super_call.args[0]
+        if isinstance(arg, nodes.Name) and arg.name != method.parent.name:
+            self.add_message(
+                "bad-super-call",
+                node=super_call,
+                args=(arg.name,)
+            )
     visit_asyncfunctiondef = visit_functiondef
